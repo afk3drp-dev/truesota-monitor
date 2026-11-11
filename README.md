@@ -17,12 +17,12 @@
   </a>
   <img src="https://img.shields.io/badge/Windows%2011-09090b?style=for-the-badge&logo=windows11&logoColor=ffffff" alt="Windows 11" />
   <img src="https://img.shields.io/badge/Tauri%20v2%20%C2%B7%20Rust-09090b?style=for-the-badge&logo=tauri&logoColor=ffffff" alt="Tauri v2 & Rust" />
-  <img src="https://img.shields.io/badge/Windows%20DPAPI-Encrypted-09090b?style=for-the-badge&logo=shield&logoColor=30d158" alt="Windows DPAPI" />
+  <img src="https://img.shields.io/badge/Windows%20DPAPI-Encrypted-09090b?style=for-the-badge" alt="Windows DPAPI" />
 </p>
 
 <p>
   <a href="https://github.com/afk3drp-dev/truesota-monitor/releases/latest">
-    <img src="https://img.shields.io/badge/%E2%AC%87%EF%B8%8F%20%D0%A1%D0%BA%D0%B0%D1%87%D0%B0%D1%82%D1%8C%20%D0%B4%D0%BB%D1%8F%20Windows%20(v1.2.0)-ffffff?style=for-the-badge" alt="Download Windows" />
+    <img src="https://img.shields.io/badge/%D0%A1%D0%BA%D0%B0%D1%87%D0%B0%D1%82%D1%8C%20%D0%B4%D0%BB%D1%8F%20Windows%20(v1.2.0)-ffffff?style=for-the-badge&logo=windows11&logoColor=000000" alt="Download Windows" />
   </a>
   &nbsp;
   <a href="https://t.me/afk3drp">
@@ -32,7 +32,7 @@
 
 <br />
 
-<img src="docs/hero_showcase.png" alt="TrueSOTA Usage Monitor Showcase" width="100%" />
+<img src="docs/hero_v120.png" alt="TrueSOTA Usage Monitor Showcase" width="100%" />
 
 </div>
 
