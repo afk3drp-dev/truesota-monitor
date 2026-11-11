@@ -1,0 +1,1647 @@
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import {
+  RefreshCw,
+  Copy,
+  Check,
+  Eye,
+  EyeOff,
+  Clock,
+  Cpu,
+  BarChart3,
+  TrendingUp,
+  AlertCircle,
+  SlidersHorizontal,
+  ChevronRight,
+  Database,
+  Maximize2,
+  ChevronDown,
+  ChevronUp,
+  Volume2,
+  VolumeX,
+  Sparkles,
+  Layers,
+  Zap,
+  PiggyBank,
+  Hourglass,
+  Search,
+  Calendar,
+  Share2,
+  Command,
+  LogOut,
+  Activity,
+} from "lucide-react";
+import { AnimatedNumber } from "./components/AnimatedNumber";
+import { ModelDonutChart } from "./components/ModelDonutChart";
+import { ModelLogo, detectProvider } from "./components/ModelLogo";
+import { ActivityHeatmap } from "./components/ActivityHeatmap";
+import { PricingCatalog } from "./components/PricingCatalog";
+import { MonitorView } from "./components/MonitorView";
+import { ShareCardModal } from "./components/ShareCardModal";
+import {
+  CommandPalette,
+  AppTab,
+  BackdropMode,
+} from "./components/CommandPalette";
+import { WelcomeAuth } from "./components/WelcomeAuth";
+import { TelegramCredit } from "./components/TelegramCredit";
+import CometDial from "./components/reactbits/CometDial";
+import SpecularButton from "./components/reactbits/SpecularButton";
+import { appleAudio } from "./utils/audio";
+import "./App.css";
+
+interface DailyUsageItem {
+  date: string;
+  requests: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens?: number;
+  cache_write_tokens?: number;
+  total_tokens: number;
+  cost: number;
+  actual_cost: number;
+}
+
+interface ModelStatItem {
+  model: string;
+  requests: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_creation_tokens?: number;
+  cache_read_tokens?: number;
+  total_tokens: number;
+  cost: number;
+  actual_cost: number;
+  account_cost?: number;
+}
+
+interface TrueSotaResponse {
+  mode?: string;
+  status?: string;
+  isValid?: boolean;
+  unit?: string;
+  quota?: {
+    limit: number;
+    remaining: number;
+    unit?: string;
+    used: number;
+  };
+  balance?: number;
+  remaining?: number;
+  usage?: {
+    average_duration_ms?: number;
+    rpm?: number;
+    tpm?: number;
+    today?: {
+      actual_cost?: number;
+      cost?: number;
+      requests?: number;
+      input_tokens?: number;
+      output_tokens?: number;
+      cache_read_tokens?: number;
+      cache_creation_tokens?: number;
+      total_tokens?: number;
+    };
+    total?: {
+      actual_cost?: number;
+      cost?: number;
+      requests?: number;
+      input_tokens?: number;
+      output_tokens?: number;
+      cache_read_tokens?: number;
+      cache_creation_tokens?: number;
+      total_tokens?: number;
+    };
+  };
+  model_stats?: ModelStatItem[];
+  daily_usage?: DailyUsageItem[];
+}
+
+function formatNumber(num: number): string {
+  if (num >= 1_000_000_000) return `${(num / 1_000_000_000).toFixed(2)}B`;
+  if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(1)}M`;
+  if (num >= 1_000) return `${(num / 1_000).toFixed(1)}K`;
+  return num.toLocaleString();
+}
+
+export default function App() {
+  const [data, setData] = useState<TrueSotaResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<string>("");
+  const [apiKey, setApiKey] = useState<string>("");
+  const [keyLoaded, setKeyLoaded] = useState<boolean>(false);
+  const skipNextLoadRef = useRef<boolean>(false);
+  const [showKey, setShowKey] = useState(false);
+  const [keyInput, setKeyInput] = useState<string>("");
+  const [copied, setCopied] = useState(false);
+  const [activeTab, setActiveTab] = useState<AppTab>("overview");
+  const [autoRefreshInterval, setAutoRefreshInterval] = useState<number>(60000);
+
+  // Kinetic & Interactive States
+  const [isIslandMode, setIsIslandMode] = useState<boolean>(false);
+  const [isIslandExpanded, setIsIslandExpanded] = useState<boolean>(false);
+  const [soundEnabled, setSoundEnabled] = useState<boolean>(appleAudio.enabled);
+  const [chartMetric, setChartMetric] = useState<"cost" | "requests" | "tokens">("cost");
+  const [hoveredDay, setHoveredDay] = useState<DailyUsageItem | null>(null);
+  const [modelSearch, setModelSearch] = useState<string>("");
+  const [providerFilter, setProviderFilter] = useState<string>("all");
+
+  // Flagship Feature States (Mica/Acrylic, Ctrl+K, Share Card)
+  const [backdropMode, setBackdropMode] = useState<BackdropMode>(() => {
+    const saved = localStorage.getItem("truesota_backdrop");
+    if (saved === "mica" || saved === "acrylic" || saved === "tabbed" || saved === "oled") {
+      return saved;
+    }
+    return "mica";
+  });
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState<boolean>(false);
+  const [shareModalOpen, setShareModalOpen] = useState<boolean>(false);
+
+  // Initialize API Key & Backdrop Material
+  useEffect(() => {
+    async function initApp() {
+      try {
+        const key = await invoke<string>("get_api_key");
+        setApiKey(key.trim());
+        setKeyInput(key.trim());
+      } catch (e) {
+        console.error("Failed to load API key", e);
+      } finally {
+        setKeyLoaded(true);
+      }
+      try {
+        await invoke("set_window_vibrancy", {
+          effect: backdropMode === "oled" ? "none" : backdropMode,
+        });
+      } catch (e) {
+        console.warn("Vibrancy unsupported on host OS", e);
+      }
+    }
+    initApp();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Global Ctrl+K / Cmd+K Spotlight Shortcut
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!apiKey) return;
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        appleAudio.playTap();
+        setCommandPaletteOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [apiKey]);
+
+  const loadData = useCallback(async (currentKey?: string) => {
+    const active = (currentKey || apiKey || "").trim();
+    if (!active) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await invoke<TrueSotaResponse>("fetch_usage", {
+        apiKey: active,
+      });
+      setData(res);
+      const now = new Date();
+      setLastUpdated(now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
+      appleAudio.playSuccessChime();
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setLoading(false);
+    }
+  }, [apiKey]);
+
+  useEffect(() => {
+    if (!apiKey) return;
+    if (skipNextLoadRef.current) {
+      skipNextLoadRef.current = false;
+      return;
+    }
+    loadData(apiKey);
+  }, [apiKey, loadData]);
+
+  useEffect(() => {
+    if (!apiKey || autoRefreshInterval <= 0) return;
+    const timer = setInterval(() => {
+      loadData();
+    }, autoRefreshInterval);
+    return () => clearInterval(timer);
+  }, [apiKey, autoRefreshInterval, loadData]);
+
+  const handleAuthenticated = (newKey: string, initialData: unknown | null) => {
+    if (initialData) {
+      skipNextLoadRef.current = true;
+      setData(initialData as TrueSotaResponse);
+      const now = new Date();
+      setLastUpdated(now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
+    }
+    setError(null);
+    setActiveTab("overview");
+    setKeyInput(newKey);
+    setApiKey(newKey);
+  };
+
+  const handleSignOut = async () => {
+    appleAudio.playSwitch();
+    try {
+      await invoke("sync_monitor_embed", {
+        visible: false,
+        x: 0,
+        y: 0,
+        width: 0,
+        height: 0,
+      });
+    } catch {
+      // ignore if embed was not initialized
+    }
+    try {
+      await invoke("clear_api_key");
+    } catch (e) {
+      console.error("Failed to clear API key", e);
+    }
+    setCommandPaletteOpen(false);
+    setShareModalOpen(false);
+    setActiveTab("overview");
+    setData(null);
+    setError(null);
+    setLastUpdated("");
+    setKeyInput("");
+    setApiKey("");
+  };
+
+  const toggleSound = () => {
+    const next = !soundEnabled;
+    appleAudio.setEnabled(next);
+    setSoundEnabled(next);
+    if (next) appleAudio.playTap();
+  };
+
+  const handleSelectBackdrop = async (mode: BackdropMode) => {
+    appleAudio.playTap();
+    setBackdropMode(mode);
+    localStorage.setItem("truesota_backdrop", mode);
+    try {
+      await invoke("set_window_vibrancy", {
+        effect: mode === "oled" ? "none" : mode,
+      });
+    } catch (e) {
+      console.error("Failed to switch backdrop", e);
+    }
+  };
+
+  const toggleIslandMode = async () => {
+    appleAudio.playSwitch();
+    const next = !isIslandMode;
+    setIsIslandMode(next);
+    setIsIslandExpanded(false);
+    if (next) {
+      setCommandPaletteOpen(false);
+      setShareModalOpen(false);
+    }
+    try {
+      await invoke("set_window_mode", {
+        mode: next ? "compact" : "normal",
+        vibrancy: next ? null : backdropMode === "oled" ? "none" : backdropMode,
+      });
+    } catch (e) {
+      console.error("Failed to set window mode", e);
+    }
+  };
+
+  const toggleIslandExpanded = async () => {
+    appleAudio.playTap();
+    const next = !isIslandExpanded;
+    setIsIslandExpanded(next);
+    try {
+      await invoke("set_compact_expanded", { expanded: next });
+    } catch (e) {
+      console.error("Failed to set compact size", e);
+    }
+  };
+
+  const handleTabChange = (tab: AppTab) => {
+    appleAudio.playTap();
+    setActiveTab(tab);
+  };
+
+  const handleSaveKey = async () => {
+    if (!keyInput.trim()) {
+      setError("Ключ не может быть пустым");
+      return;
+    }
+    try {
+      await invoke<string>("save_api_key", { key: keyInput.trim() });
+      setApiKey(keyInput.trim());
+      appleAudio.playSuccessChime();
+      loadData(keyInput.trim());
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const handleCopyReport = () => {
+    if (!data) return;
+    appleAudio.playTap();
+    const lim = data.quota?.limit ?? 0;
+    const rem = data.quota?.remaining ?? data.remaining ?? data.balance ?? 0;
+    const usd = data.quota?.used ?? 0;
+    const tdReq = data.usage?.today?.requests ?? 0;
+    const tdCost = data.usage?.today?.actual_cost ?? data.usage?.today?.cost ?? 0;
+
+    const text = `=== TrueSOTA Usage Report ===\nСтатус: ${data.status || "active"} | Режим: ${data.mode || "quota"}\nКвота: $${rem.toFixed(2)} из $${lim.toFixed(2)} (потрачено $${usd.toFixed(2)})\nСегодня: ${tdReq} запросов на $${tdCost.toFixed(2)}\nОбновлено: ${lastUpdated}`;
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  // Core Quota Metrics
+  const limit = data?.quota?.limit ?? 450.0;
+  const remaining = data?.quota?.remaining ?? data?.remaining ?? data?.balance ?? 0;
+  const used = data?.quota?.used ?? Math.max(0, limit - remaining);
+  const percent = limit > 0 ? Math.min(100, Math.max(0, (remaining / limit) * 100)) : 0;
+
+  // Today Metrics
+  const todayCost = data?.usage?.today?.actual_cost ?? data?.usage?.today?.cost ?? 0;
+  const todayNominal = data?.usage?.today?.cost ?? todayCost;
+  const todayReq = data?.usage?.today?.requests ?? 0;
+  const todayTokens = data?.usage?.today?.total_tokens ?? 0;
+  const todayCacheRead = data?.usage?.today?.cache_read_tokens ?? 0;
+  const todaySavingsPct = todayNominal > todayCost && todayNominal > 0
+    ? Math.round(((todayNominal - todayCost) / todayNominal) * 100)
+    : 0;
+
+  // Total Metrics
+  const totalCost = data?.usage?.total?.actual_cost ?? data?.usage?.total?.cost ?? 0;
+  const totalNominal = data?.usage?.total?.cost ?? totalCost;
+  const totalSaved = Math.max(0, totalNominal - totalCost);
+  const totalSavedPct = totalNominal > 0 ? (totalSaved / totalNominal) * 100 : 0;
+  const totalReq = data?.usage?.total?.requests ?? 0;
+  const totalTokens = data?.usage?.total?.total_tokens ?? 0;
+  const totalInputTokens = data?.usage?.total?.input_tokens ?? 0;
+  const totalOutputTokens = data?.usage?.total?.output_tokens ?? 0;
+  const totalCacheRead = data?.usage?.total?.cache_read_tokens ?? 0;
+  const cacheHitPct = totalTokens > 0 ? (totalCacheRead / totalTokens) * 100 : 0;
+
+  const rpm = data?.usage?.rpm ?? 0;
+  const tpm = data?.usage?.tpm ?? 0;
+  const avgDurationSec = (data?.usage?.average_duration_ms ?? 0) / 1000;
+  const avgCostPerReq = totalReq > 0 ? totalCost / totalReq : 0;
+
+  // Daily Chart & Burn-rate Forecast
+  const chartDays = useMemo(() => {
+    if (!data?.daily_usage || data.daily_usage.length === 0) return [];
+    return data.daily_usage.slice(-14);
+  }, [data]);
+
+  const maxChartValue = useMemo(() => {
+    if (chartDays.length === 0) return 1;
+    return Math.max(
+      ...chartDays.map((d) => {
+        if (chartMetric === "requests") return d.requests || 0;
+        if (chartMetric === "tokens") return d.total_tokens || 0;
+        return d.actual_cost ?? d.cost ?? 0;
+      }),
+      0.01
+    );
+  }, [chartDays, chartMetric]);
+
+  const forecastInfo = useMemo(() => {
+    const recent = (data?.daily_usage || []).slice(-7).filter((d) => (d.actual_cost ?? d.cost ?? 0) > 0);
+    if (recent.length === 0) return { avgDaily: 0, daysLeft: null as number | null };
+    const sum = recent.reduce((acc, d) => acc + (d.actual_cost ?? d.cost ?? 0), 0);
+    const avgDaily = sum / recent.length;
+    const daysLeft = avgDaily > 0 ? remaining / avgDaily : null;
+    return { avgDaily, daysLeft };
+  }, [data, remaining]);
+
+  // Sorted Models & Providers
+  const topModels = useMemo(() => {
+    if (!data?.model_stats) return [];
+    return [...data.model_stats].sort(
+      (a, b) => (b.actual_cost ?? b.cost ?? 0) - (a.actual_cost ?? a.cost ?? 0)
+    );
+  }, [data]);
+
+  const availableProviders = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const m of topModels) {
+      const p = detectProvider(m.model);
+      if (!map.has(p.id)) map.set(p.id, p.label);
+    }
+    return Array.from(map.entries()).map(([id, label]) => ({ id, label }));
+  }, [topModels]);
+
+  const filteredModels = useMemo(() => {
+    return topModels.filter((m) => {
+      const matchesSearch = m.model.toLowerCase().includes(modelSearch.trim().toLowerCase());
+      const matchesProvider =
+        providerFilter === "all" || detectProvider(m.model).id === providerFilter;
+      return matchesSearch && matchesProvider;
+    });
+  }, [topModels, modelSearch, providerFilter]);
+
+  const ringColor = percent > 30 ? "var(--apple-green)" : percent > 10 ? "var(--apple-orange)" : "var(--apple-red)";
+
+  // ========================================================
+  // 1. Dynamic Island Mode Rendering
+  // ========================================================
+  if (isIslandMode) {
+    return (
+      <div className="dynamic-island-wrapper" data-tauri-drag-region>
+        <div className={`dynamic-island-capsule ${isIslandExpanded ? "expanded" : ""}`}>
+          <div className="island-main-bar" data-tauri-drag-region>
+            <div className="island-ring-box" data-tauri-drag-region>
+              <svg viewBox="0 0 36 36" className="island-ring-svg">
+                <circle
+                  cx="18"
+                  cy="18"
+                  r="14"
+                  fill="none"
+                  stroke="rgba(255, 255, 255, 0.08)"
+                  strokeWidth="3.2"
+                />
+                <circle
+                  cx="18"
+                  cy="18"
+                  r="14"
+                  fill="none"
+                  stroke={ringColor}
+                  strokeWidth="3.4"
+                  strokeDasharray={`${percent * 0.88} 100`}
+                  strokeLinecap="round"
+                  transform="rotate(-90 18 18)"
+                  style={{ transition: "stroke-dasharray 0.8s cubic-bezier(0.16, 1, 0.3, 1)" }}
+                />
+              </svg>
+              <span className="island-ring-label">{Math.round(percent)}%</span>
+            </div>
+
+            <div className="island-info" data-tauri-drag-region>
+              <div className="island-quota-line" data-tauri-drag-region>
+                <AnimatedNumber value={remaining} prefix="$" decimals={2} className="island-quota-val" />
+                <span className="island-quota-limit">/ ${limit.toFixed(0)}</span>
+              </div>
+              <div className="island-sub-line" data-tauri-drag-region>
+                <span className="island-today-pill">
+                  Сегодня: <AnimatedNumber value={todayCost} prefix="$" decimals={2} /> ({todayReq} зап.)
+                </span>
+              </div>
+            </div>
+
+            <div className="island-controls">
+              <button
+                className={`island-btn refresh-btn ${loading ? "spinning" : ""}`}
+                onClick={() => {
+                  appleAudio.playTap();
+                  loadData();
+                }}
+                title="Обновить"
+              >
+                <RefreshCw size={12} />
+              </button>
+              <button
+                className="island-btn expand-btn"
+                onClick={toggleIslandExpanded}
+                title={isIslandExpanded ? "Свернуть детали" : "Развернуть детали"}
+              >
+                {isIslandExpanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+              </button>
+              <button
+                className="island-btn restore-btn"
+                onClick={toggleIslandMode}
+                title="Развернуть в полное окно"
+              >
+                <Maximize2 size={12} />
+              </button>
+            </div>
+          </div>
+
+          {isIslandExpanded && (
+            <div className="island-drawer">
+              <div className="island-drawer-row">
+                <div className="island-drawer-metric">
+                  <span className="label">Всего расход</span>
+                  <AnimatedNumber value={totalCost} prefix="$" decimals={2} className="val" />
+                </div>
+                <div className="island-drawer-metric">
+                  <span className="label">Экономия кэша</span>
+                  <span className="val" style={{ color: "var(--apple-green)" }}>
+                    {cacheHitPct.toFixed(0)}%
+                  </span>
+                </div>
+                <div className="island-drawer-metric">
+                  <span className="label">RPM / TPM</span>
+                  <span className="val">{rpm} / {formatNumber(tpm)}</span>
+                </div>
+              </div>
+
+              {topModels.length > 0 && (
+                <div className="island-top-models">
+                  {topModels.slice(0, 2).map((m) => (
+                    <div key={m.model} className="island-model-pill">
+                      <ModelLogo model={m.model} size={12} withBadge={false} />
+                      <span className="model-name">{m.model}</span>
+                      <span className="model-cost">${(m.actual_cost ?? m.cost ?? 0).toFixed(2)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ========================================================
+  // 1.5. Boot / Welcome Sign-In Gate (No Personal Keys Embedded)
+  // ========================================================
+  if (!keyLoaded) {
+    return (
+      <div className={`apple-window backdrop-${backdropMode}`}>
+        <header className="mac-titlebar" data-tauri-drag-region>
+          <div className="traffic-lights" onMouseDown={(e) => e.stopPropagation()}>
+            <button type="button" className="light close" onClick={() => invoke("window_close")}><span>×</span></button>
+            <button type="button" className="light minimize" onClick={() => invoke("window_minimize")}><span>−</span></button>
+            <button type="button" className="light zoom" onClick={() => invoke("window_toggle_maximize")}><span>+</span></button>
+          </div>
+          <div className="titlebar-center" data-tauri-drag-region>
+            <span className="app-title-text">TrueSOTA</span>
+            <span className="app-badge-pro">PRO</span>
+          </div>
+          <div className="traffic-lights" style={{ opacity: 0, pointerEvents: "none" }} />
+        </header>
+      </div>
+    );
+  }
+
+  if (!apiKey) {
+    return (
+      <div className={`apple-window backdrop-${backdropMode}`}>
+        <header className="mac-titlebar welcome-titlebar" data-tauri-drag-region>
+          <div className="traffic-lights" onMouseDown={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              className="light close"
+              title="Закрыть окно"
+              onClick={() => invoke("window_close")}
+            >
+              <span>×</span>
+            </button>
+            <button
+              type="button"
+              className="light minimize"
+              title="Свернуть"
+              onClick={() => invoke("window_minimize")}
+            >
+              <span>−</span>
+            </button>
+            <button
+              type="button"
+              className="light zoom"
+              title="На весь экран"
+              onClick={() => invoke("window_toggle_maximize")}
+            >
+              <span>+</span>
+            </button>
+          </div>
+
+          <div className="titlebar-center" data-tauri-drag-region>
+            <div className="app-badge-title" data-tauri-drag-region>
+              <span className="app-title-text" data-tauri-drag-region>TrueSOTA</span>
+              <span className="app-badge-pro" data-tauri-drag-region>PRO</span>
+            </div>
+            <div className="status-pill" data-tauri-drag-region>
+              <span className="status-label">Добро пожаловать</span>
+            </div>
+          </div>
+
+          <div className="titlebar-actions" onMouseDown={(e) => e.stopPropagation()}>
+            <div className="backdrop-segmented">
+              {(["mica", "acrylic", "oled"] as BackdropMode[]).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  className={`backdrop-chip ${backdropMode === mode ? "active" : ""}`}
+                  onClick={() => handleSelectBackdrop(mode)}
+                >
+                  {mode === "mica" ? "Mica" : mode === "acrylic" ? "Acrylic" : "OLED"}
+                </button>
+              ))}
+            </div>
+          </div>
+        </header>
+
+        <WelcomeAuth onAuthenticated={handleAuthenticated} />
+      </div>
+    );
+  }
+
+  // ========================================================
+  // 2. Full macOS Apple Dark Window Rendering
+  // ========================================================
+  return (
+    <div className={`apple-window backdrop-${backdropMode}`}>
+      {/* macOS Unified Frameless Titlebar */}
+      <header className="mac-titlebar" data-tauri-drag-region>
+        <div
+          className="traffic-lights"
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <button
+            type="button"
+            className="light close"
+            title="Закрыть окно"
+            onClick={() => invoke("window_close")}
+          >
+            <span>×</span>
+          </button>
+          <button
+            type="button"
+            className="light minimize"
+            title="Свернуть"
+            onClick={() => invoke("window_minimize")}
+          >
+            <span>−</span>
+          </button>
+          <button
+            type="button"
+            className="light zoom"
+            title="На весь экран"
+            onClick={() => invoke("window_toggle_maximize")}
+          >
+            <span>+</span>
+          </button>
+        </div>
+
+        <div className="titlebar-center" data-tauri-drag-region>
+          <div className="app-badge-title" data-tauri-drag-region>
+            <span className="app-title-text" data-tauri-drag-region>TrueSOTA</span>
+            <span className="app-badge-pro" data-tauri-drag-region>PRO</span>
+          </div>
+          <div className="status-pill" data-tauri-drag-region>
+            <span className="status-dot-pulse" />
+            <span className="status-label">{data?.status || "active"}</span>
+          </div>
+        </div>
+
+        <div
+          className="titlebar-actions"
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <button
+            type="button"
+            className="spotlight-trigger-btn"
+            onClick={() => {
+              appleAudio.playTap();
+              setCommandPaletteOpen(true);
+            }}
+            title="Быстрые команды (Ctrl+K)"
+          >
+            <Command size={12} />
+            <span>K</span>
+          </button>
+
+          <button
+            type="button"
+            className="mac-icon-btn"
+            onClick={() => {
+              appleAudio.playTap();
+              setShareModalOpen(true);
+            }}
+            title="Создать Apple Share Card / Экспорт отчёта"
+          >
+            <Share2 size={14} />
+          </button>
+
+          <button
+            type="button"
+            className="dynamic-island-toggle-btn"
+            onClick={toggleIslandMode}
+            title="Переключить в плавающий мини-виджет Dynamic Island"
+          >
+            <Sparkles size={13} color="#ff9f0a" />
+            <span>Островок</span>
+          </button>
+
+          <button
+            type="button"
+            className={`sound-toggle-btn ${!soundEnabled ? "muted" : ""}`}
+            onClick={toggleSound}
+            title={soundEnabled ? "Звуки включены" : "Звуки выключены"}
+          >
+            {soundEnabled ? <Volume2 size={13} /> : <VolumeX size={13} />}
+          </button>
+
+          <button
+            type="button"
+            className={`mac-icon-btn ${copied ? "success" : ""}`}
+            onClick={handleCopyReport}
+            title="Скопировать сводку"
+          >
+            {copied ? <Check size={14} /> : <Copy size={14} />}
+          </button>
+
+          <button
+            type="button"
+            className={`mac-icon-btn ${loading ? "spinning" : ""}`}
+            onClick={() => {
+              appleAudio.playTap();
+              loadData();
+            }}
+            disabled={loading}
+            title="Обновить данные"
+          >
+            <RefreshCw size={14} />
+          </button>
+        </div>
+      </header>
+
+      {/* macOS Segmented Control Tabs */}
+      <div className="segmented-wrapper">
+        <div className="mac-segmented-control">
+          <button
+            type="button"
+            className={`segment ${activeTab === "overview" ? "active" : ""}`}
+            onClick={() => handleTabChange("overview")}
+          >
+            <TrendingUp size={13} />
+            <span>Обзор</span>
+          </button>
+          <button
+            type="button"
+            className={`segment ${activeTab === "pricing" ? "active" : ""}`}
+            onClick={() => handleTabChange("pricing")}
+          >
+            <Layers size={13} />
+            <span>Тарифы</span>
+          </button>
+          <button
+            type="button"
+            className={`segment ${activeTab === "monitor" ? "active" : ""}`}
+            onClick={() => handleTabChange("monitor")}
+          >
+            <Activity size={13} />
+            <span>Монитор</span>
+          </button>
+          <button
+            type="button"
+            className={`segment ${activeTab === "analytics" ? "active" : ""}`}
+            onClick={() => handleTabChange("analytics")}
+          >
+            <Calendar size={13} />
+            <span>Аналитика</span>
+          </button>
+          <button
+            type="button"
+            className={`segment ${activeTab === "models" ? "active" : ""}`}
+            onClick={() => handleTabChange("models")}
+          >
+            <Cpu size={13} />
+            <span>Модели</span>
+            {topModels.length > 0 && <span className="tab-pill">{topModels.length}</span>}
+          </button>
+          <button
+            type="button"
+            className={`segment ${activeTab === "history" ? "active" : ""}`}
+            onClick={() => handleTabChange("history")}
+          >
+            <BarChart3 size={13} />
+            <span>История</span>
+          </button>
+          <button
+            type="button"
+            className={`segment ${activeTab === "settings" ? "active" : ""}`}
+            onClick={() => handleTabChange("settings")}
+          >
+            <SlidersHorizontal size={13} />
+            <span>Настройки</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Main Content Area */}
+      <main className="mac-viewport">
+        {error && (
+          <div className="toast-banner error">
+            <AlertCircle size={15} />
+            <span>{error}</span>
+          </div>
+        )}
+
+        {/* TAB 1: OVERVIEW */}
+        {activeTab === "overview" && (
+          <div className="bento-container">
+            {/* 3-Column Bento Hero Grid */}
+            <div className="bento-hero-grid">
+              {/* Quota Ring Card */}
+              <div className="bento-card hero-quota-card">
+                <div className="card-subhead">
+                  <span>Квота пакета</span>
+                  <span className="mode-pill">{data?.mode || "quota"}</span>
+                </div>
+                <div className="ring-content-row">
+                  <div className="gauge-ring-container">
+                    <svg viewBox="0 0 100 100" className="gauge-svg" width="108" height="108">
+                      <circle cx="50" cy="50" r="40" className="gauge-bg" strokeWidth="8" />
+                      <circle
+                        cx="50"
+                        cy="50"
+                        r="40"
+                        className={`gauge-fill ${percent < 15 ? "low" : percent < 40 ? "med" : "good"}`}
+                        strokeWidth="8"
+                        strokeDasharray="251.32"
+                        strokeDashoffset={251.32 * (1 - percent / 100)}
+                        strokeLinecap="round"
+                        style={{ transition: "stroke-dashoffset 0.8s cubic-bezier(0.16, 1, 0.3, 1)" }}
+                      />
+                    </svg>
+                    <div className="gauge-inner-text">
+                      <AnimatedNumber value={percent} decimals={1} suffix="%" className="gauge-pct" />
+                      <span className="gauge-pct-sub">остаток</span>
+                    </div>
+                  </div>
+
+                  <div className="hero-money-details">
+                    <AnimatedNumber value={remaining} prefix="$" decimals={2} className="hero-big-money" />
+                    <div className="hero-meta-list">
+                      <div className="meta-item">
+                        <span className="dot blue" />
+                        <span className="meta-label">Лимит:</span>
+                        <span className="meta-val">${limit.toFixed(2)}</span>
+                      </div>
+                      <div className="meta-item">
+                        <span className="dot gray" />
+                        <span className="meta-label">Потрачено:</span>
+                        <span className="meta-val">${used.toFixed(2)}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Today Card */}
+              <div className="bento-card metric-card">
+                <div className="card-subhead">
+                  <span>Сегодня</span>
+                  <Clock size={13} className="subhead-icon green" />
+                </div>
+                <div className="metric-cost-row">
+                  <AnimatedNumber value={todayCost} prefix="$" decimals={2} className="metric-large-text" />
+                  {todaySavingsPct > 0 && (
+                    <>
+                      <span className="strike-cost">${todayNominal.toFixed(2)}</span>
+                      <span className="savings-tag">-{todaySavingsPct}%</span>
+                    </>
+                  )}
+                </div>
+                <div className="metric-specs-list">
+                  <div className="spec-row">
+                    <span>Запросы</span>
+                    <strong><AnimatedNumber value={todayReq} decimals={0} /></strong>
+                  </div>
+                  <div className="spec-row">
+                    <span>Кэш-токены</span>
+                    <strong>{formatNumber(todayCacheRead)} / {formatNumber(todayTokens)}</strong>
+                  </div>
+                  <div className="spec-row sub">
+                    <span>RPM / TPM</span>
+                    <span>{rpm} / {formatNumber(tpm)}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Total Card */}
+              <div className="bento-card metric-card">
+                <div className="card-subhead">
+                  <span>Всего</span>
+                  <Database size={13} className="subhead-icon blue" />
+                </div>
+                <div className="metric-cost-row">
+                  <AnimatedNumber value={totalCost} prefix="$" decimals={2} className="metric-large-text" />
+                  {totalSavedPct >= 1 && (
+                    <span className="savings-tag">-{Math.round(totalSavedPct)}%</span>
+                  )}
+                </div>
+                <div className="metric-specs-list">
+                  <div className="spec-row">
+                    <span>Запросы</span>
+                    <strong><AnimatedNumber value={totalReq} decimals={0} /></strong>
+                  </div>
+                  <div className="spec-row">
+                    <span>In / Out</span>
+                    <strong>{formatNumber(totalInputTokens)} / {formatNumber(totalOutputTokens)}</strong>
+                  </div>
+                  <div className="spec-row sub">
+                    <span>Всего токенов</span>
+                    <strong>{formatNumber(totalTokens)}</strong>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* 4-Column Apple Insights Strip */}
+            <div className="insights-strip">
+              <div className="insight-pill-card">
+                <div className="insight-icon-wrap green">
+                  <Layers size={16} />
+                </div>
+                <div className="insight-text-col">
+                  <span className="insight-label">Кэш-хит</span>
+                  <span className="insight-val">
+                    <AnimatedNumber value={cacheHitPct} decimals={1} suffix="%" />
+                  </span>
+                  <span className="insight-sub">{formatNumber(totalCacheRead)} из кэша</span>
+                </div>
+              </div>
+
+              <div className="insight-pill-card">
+                <div className="insight-icon-wrap blue">
+                  <PiggyBank size={16} />
+                </div>
+                <div className="insight-text-col">
+                  <span className="insight-label">Экономия</span>
+                  <span className="insight-val">
+                    <AnimatedNumber value={totalSaved} prefix="$" decimals={2} />
+                  </span>
+                  <span className="insight-sub">база ${totalNominal.toFixed(0)}</span>
+                </div>
+              </div>
+
+              <div className="insight-pill-card">
+                <div className="insight-icon-wrap orange">
+                  <Zap size={16} />
+                </div>
+                <div className="insight-text-col">
+                  <span className="insight-label">Ср. отклик</span>
+                  <span className="insight-val">
+                    {avgDurationSec > 0 ? `${avgDurationSec.toFixed(1)}с` : "—"}
+                  </span>
+                  <span className="insight-sub">~${avgCostPerReq.toFixed(3)} / зап.</span>
+                </div>
+              </div>
+
+              <div className="insight-pill-card">
+                <div className="insight-icon-wrap purple">
+                  <Hourglass size={16} />
+                </div>
+                <div className="insight-text-col">
+                  <span className="insight-label">Прогноз</span>
+                  <span className="insight-val">
+                    {forecastInfo.daysLeft !== null
+                      ? `~${forecastInfo.daysLeft < 1 ? "< 1" : Math.round(forecastInfo.daysLeft)} дн.`
+                      : "—"}
+                  </span>
+                  <span className="insight-sub">
+                    ${forecastInfo.avgDaily.toFixed(1)}/день (7д)
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* 14-Day Interactive Spend Trend Chart */}
+            <div className="bento-card chart-card">
+              <div className="chart-header">
+                <div className="chart-title-wrap">
+                  <div className="chart-header-left">
+                    <span className="card-subhead">Динамика (14 дней)</span>
+                    <div className="chart-metric-pills">
+                      <button
+                        className={`chart-metric-btn ${chartMetric === "cost" ? "active" : ""}`}
+                        onClick={() => {
+                          appleAudio.playTap();
+                          setChartMetric("cost");
+                        }}
+                      >
+                        Расход $
+                      </button>
+                      <button
+                        className={`chart-metric-btn ${chartMetric === "requests" ? "active" : ""}`}
+                        onClick={() => {
+                          appleAudio.playTap();
+                          setChartMetric("requests");
+                        }}
+                      >
+                        Запросы
+                      </button>
+                      <button
+                        className={`chart-metric-btn ${chartMetric === "tokens" ? "active" : ""}`}
+                        onClick={() => {
+                          appleAudio.playTap();
+                          setChartMetric("tokens");
+                        }}
+                      >
+                        Токены
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="chart-hover-pill">
+                    {hoveredDay ? (
+                      <span>
+                        {hoveredDay.date}:{" "}
+                        <strong>${(hoveredDay.actual_cost ?? hoveredDay.cost ?? 0).toFixed(2)}</strong> •{" "}
+                        {hoveredDay.requests} зап. • {formatNumber(hoveredDay.total_tokens)} ток.
+                      </span>
+                    ) : (
+                      <span>
+                        Пик:{" "}
+                        <strong>
+                          {chartMetric === "cost"
+                            ? `$${maxChartValue.toFixed(2)}`
+                            : chartMetric === "requests"
+                            ? `${Math.round(maxChartValue)} зап.`
+                            : formatNumber(maxChartValue)}
+                        </strong>
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="bars-track-area">
+                {chartDays.map((d) => {
+                  const val =
+                    chartMetric === "requests"
+                      ? d.requests || 0
+                      : chartMetric === "tokens"
+                      ? d.total_tokens || 0
+                      : d.actual_cost ?? d.cost ?? 0;
+                  const heightPct = Math.max(8, Math.min(100, (val / (maxChartValue || 1)) * 100));
+                  const isToday = d.date === chartDays[chartDays.length - 1]?.date;
+                  const isHovered = hoveredDay?.date === d.date;
+                  return (
+                    <div
+                      key={d.date}
+                      className={`chart-bar-col ${isHovered ? "active" : ""}`}
+                      onMouseEnter={() => setHoveredDay(d)}
+                      onMouseLeave={() => setHoveredDay(null)}
+                    >
+                      <div className="bar-pillar-wrap">
+                        <div
+                          className={`bar-pillar ${isToday ? "today" : ""}`}
+                          style={{
+                            height: `${heightPct}%`,
+                            background: isToday
+                              ? "var(--apple-green)"
+                              : isHovered
+                              ? "var(--apple-blue)"
+                              : undefined,
+                          }}
+                        />
+                      </div>
+                      <span className="bar-date-label">{d.date.slice(5)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Top Models Preview Card with AI Logos */}
+            {topModels.length > 0 && (
+              <div className="bento-card preview-models-card">
+                <div className="card-subhead-row">
+                  <span className="card-subhead">Топ нейросетей</span>
+                  <button className="link-btn" onClick={() => handleTabChange("models")}>
+                    <span>Все модели ({topModels.length})</span>
+                    <ChevronRight size={12} />
+                  </button>
+                </div>
+
+                <div className="models-mini-list">
+                  {topModels.slice(0, 4).map((item) => {
+                    const actual = item.actual_cost ?? item.cost ?? 0;
+                    const nominal = item.cost || actual;
+                    const sharePct = totalCost > 0 ? (actual / totalCost) * 100 : 0;
+                    const provider = detectProvider(item.model);
+                    return (
+                      <div key={item.model} className="mini-model-row-logo">
+                        <div className="model-identity-cell">
+                          <ModelLogo model={item.model} size={15} withBadge={true} />
+                          <div className="model-identity-text">
+                            <span className="mini-model-name" title={item.model}>
+                              {item.model}
+                            </span>
+                            <span className="model-provider-sub">
+                              {provider.label} • {formatNumber(item.total_tokens)} токенов
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="mini-model-bar-wrap">
+                          <div
+                            className="mini-model-bar"
+                            style={{
+                              width: `${Math.min(100, Math.max(6, sharePct))}%`,
+                              backgroundColor: provider.color,
+                            }}
+                          />
+                        </div>
+
+                        <div className="mini-model-stats">
+                          <strong>${actual.toFixed(2)}</strong>
+                          {nominal > actual * 1.05 && (
+                            <span className="strike-cost">${nominal.toFixed(0)}</span>
+                          )}
+                          <span>({item.requests})</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* TAB 2: MODELS */}
+        {activeTab === "models" && (
+          <div className="view-container">
+            <ModelDonutChart stats={topModels} />
+
+            {/* Search & Provider Filter Toolbar */}
+            <div className="models-toolbar">
+              <div className="models-search-wrap">
+                <Search size={14} className="models-search-icon" />
+                <input
+                  type="text"
+                  className="models-search-input"
+                  placeholder="Поиск нейросети..."
+                  value={modelSearch}
+                  onChange={(e) => setModelSearch(e.target.value)}
+                />
+              </div>
+
+              <div className="provider-filter-pills">
+                <button
+                  className={`provider-filter-btn ${providerFilter === "all" ? "active" : ""}`}
+                  onClick={() => {
+                    appleAudio.playTap();
+                    setProviderFilter("all");
+                  }}
+                >
+                  Все ({topModels.length})
+                </button>
+                {availableProviders.map((prov) => (
+                  <button
+                    key={prov.id}
+                    className={`provider-filter-btn ${providerFilter === prov.id ? "active" : ""}`}
+                    onClick={() => {
+                      appleAudio.playTap();
+                      setProviderFilter(prov.id);
+                    }}
+                  >
+                    {prov.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="bento-card table-wrapper-card">
+              <div className="mac-table-header models-cols">
+                <span>Нейросеть</span>
+                <span>Вызовы</span>
+                <span style={{ textAlign: "right" }}>Токены (Кэш)</span>
+                <span style={{ textAlign: "right" }}>Факт / База</span>
+              </div>
+              <div className="mac-table-body">
+                {filteredModels.map((item) => {
+                  const actual = item.actual_cost ?? item.cost ?? 0;
+                  const nominal = item.cost || actual;
+                  const provider = detectProvider(item.model);
+                  const modelCachePct =
+                    item.total_tokens > 0 && item.cache_read_tokens
+                      ? Math.round((item.cache_read_tokens / item.total_tokens) * 100)
+                      : 0;
+                  const discPct =
+                    nominal > actual && nominal > 0
+                      ? Math.round(((nominal - actual) / nominal) * 100)
+                      : 0;
+
+                  return (
+                    <div key={item.model} className="mac-table-row models-cols">
+                      <div className="model-identity-cell">
+                        <ModelLogo model={item.model} size={15} withBadge={true} />
+                        <div className="model-identity-text">
+                          <span className="mini-model-name" title={item.model}>
+                            {item.model}
+                          </span>
+                          <span className="model-provider-sub">{provider.label}</span>
+                        </div>
+                      </div>
+
+                      <div className="col-cell reqs">
+                        <div className="table-bar-track">
+                          <div
+                            className="table-bar-fill"
+                            style={{
+                              width: `${Math.min(100, (item.requests / (totalReq || 1)) * 100)}%`,
+                              backgroundColor: provider.color,
+                            }}
+                          />
+                        </div>
+                        <span className="req-count-label">{item.requests.toLocaleString()}</span>
+                      </div>
+
+                      <div className="cost-dual-cell">
+                        <span className="font-mono">{formatNumber(item.total_tokens)}</span>
+                        <span className="token-breakdown-sub">
+                          In {formatNumber(item.input_tokens)} • Cache {modelCachePct}%
+                        </span>
+                      </div>
+
+                      <div className="cost-dual-cell">
+                        <span className="font-mono font-semibold text-green">
+                          ${actual.toFixed(3)}
+                        </span>
+                        {discPct >= 5 && (
+                          <div className="cost-dual-sub">
+                            <span className="strike-cost">${nominal.toFixed(2)}</span>
+                            <span className="savings-tag">-{discPct}%</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+                {filteredModels.length === 0 && (
+                  <div className="empty-state">Нет моделей по заданному фильтру</div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 3: HISTORY */}
+        {activeTab === "history" && (
+          <div className="view-container">
+            <div className="bento-card table-wrapper-card">
+              <div className="mac-table-header history-cols">
+                <span>Дата</span>
+                <span>Запросы</span>
+                <span style={{ textAlign: "right" }}>Токены</span>
+                <span style={{ textAlign: "right" }}>Кэш</span>
+                <span style={{ textAlign: "right" }}>Расход</span>
+              </div>
+              <div className="mac-table-body">
+                {(data?.daily_usage || []).slice().reverse().map((d) => {
+                  const actual = d.actual_cost ?? d.cost ?? 0;
+                  const nominal = d.cost || actual;
+                  const cacheHit =
+                    d.total_tokens > 0 && d.cache_read_tokens
+                      ? Math.round((d.cache_read_tokens / d.total_tokens) * 100)
+                      : 0;
+                  return (
+                    <div key={d.date} className="mac-table-row history-cols">
+                      <span className="font-mono">{d.date}</span>
+                      <span className="col-cell font-mono">{d.requests.toLocaleString()}</span>
+                      <span className="col-cell tokens font-mono text-dim">{formatNumber(d.total_tokens)}</span>
+                      <span className="col-cell tokens font-mono" style={{ color: "var(--apple-cyan)" }}>
+                        {cacheHit}%
+                      </span>
+                      <div className="cost-dual-cell">
+                        <span className="font-mono font-semibold" style={{ color: "var(--apple-orange)" }}>
+                          ${actual.toFixed(2)}
+                        </span>
+                        {nominal > actual * 1.05 && (
+                          <span className="strike-cost">${nominal.toFixed(2)}</span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* TAB: PUBLIC PRICING & GROUPS */}
+        {activeTab === "pricing" && (
+          <PricingCatalog
+            apiKey={apiKey}
+            onOpenMonitorTab={() => handleTabChange("monitor")}
+          />
+        )}
+
+        {/* TAB: LIVE EMBEDDED CHANNEL MONITOR */}
+        {activeTab === "monitor" && (
+          <MonitorView
+            apiKey={apiKey}
+            isVisible={
+              activeTab === "monitor" &&
+              !commandPaletteOpen &&
+              !shareModalOpen &&
+              !isIslandMode
+            }
+            onSyncTrigger={error ? 1 : 0}
+          />
+        )}
+
+        {/* TAB: HEATMAP & CACHE PROFILER */}
+        {activeTab === "analytics" && (
+          <ActivityHeatmap
+            dailyUsage={data?.daily_usage || []}
+            modelStats={data?.model_stats || []}
+          />
+        )}
+
+        {/* TAB 4: SETTINGS */}
+        {activeTab === "settings" && (
+          <div className="settings-view">
+            <div className="settings-group">
+              <span className="settings-group-title">КОНФИГУРАЦИЯ API И ИНТЕРФЕЙСА</span>
+              <div className="bento-card inset-card">
+                <div className="setting-row">
+                  <div className="setting-label-col">
+                    <span className="setting-name">TrueSOTA API Key</span>
+                    <span className="setting-description">Авторизационный токен доступа к API (хранится только у вас)</span>
+                  </div>
+                  <div className="setting-input-wrap">
+                    <div className="mac-input-box">
+                      <input
+                        type={showKey ? "text" : "password"}
+                        value={keyInput}
+                        onChange={(e) => setKeyInput(e.target.value)}
+                        placeholder="Вставьте ваш API ключ..."
+                        className="mac-key-input"
+                      />
+                      <button
+                        type="button"
+                        className="key-eye-btn"
+                        onClick={() => setShowKey(!showKey)}
+                      >
+                        {showKey ? <EyeOff size={14} /> : <Eye size={14} />}
+                      </button>
+                    </div>
+                    <SpecularButton
+                      type="button"
+                      size="sm"
+                      radius={9}
+                      tint="#0a84ff"
+                      tintOpacity={0.22}
+                      lineColor="#7dd3fc"
+                      baseColor="#1e3a8a"
+                      onClick={handleSaveKey}
+                    >
+                      Сохранить
+                    </SpecularButton>
+                    <button
+                      type="button"
+                      className="mac-action-btn signout-btn"
+                      onClick={handleSignOut}
+                      title="Удалить ключ и выйти на экран приветствия"
+                    >
+                      <LogOut size={13} />
+                      <span>Выйти</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="info-divider" style={{ margin: "12px 0" }} />
+
+                <div className="setting-row comet-setting-row">
+                  <div className="setting-label-col">
+                    <span className="setting-name">Интервал автообновления (CometDial)</span>
+                    <span className="setting-description">
+                      Покрутите шкалу или выберите пресет • Сейчас:{" "}
+                      <strong>
+                        {autoRefreshInterval <= 0
+                          ? "Выключено"
+                          : `${Math.round(autoRefreshInterval / 1000)} сек`}
+                      </strong>
+                    </span>
+                    <div className="backdrop-segmented" style={{ marginTop: "8px" }}>
+                      {[
+                        { ms: 0, label: "Выкл" },
+                        { ms: 30000, label: "30с" },
+                        { ms: 60000, label: "60с" },
+                        { ms: 180000, label: "3м" },
+                      ].map((p) => (
+                        <button
+                          key={p.ms}
+                          type="button"
+                          className={`backdrop-chip ${autoRefreshInterval === p.ms ? "active" : ""}`}
+                          onClick={() => {
+                            appleAudio.playTap();
+                            setAutoRefreshInterval(p.ms);
+                          }}
+                        >
+                          {p.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="comet-dial-wrap">
+                    <CometDial
+                      value={Math.round(autoRefreshInterval / 1000)}
+                      min={0}
+                      max={300}
+                      step={15}
+                      unit="с"
+                      size={112}
+                      thickness={9}
+                      accent="#0a84ff"
+                      ink="#f5f5f7"
+                      onChange={(sec) => setAutoRefreshInterval(sec * 1000)}
+                      onChangeEnd={() => appleAudio.playTap()}
+                    />
+                  </div>
+                </div>
+
+                <div className="info-divider" style={{ margin: "12px 0" }} />
+
+                <div className="setting-row">
+                  <div className="setting-label-col">
+                    <span className="setting-name">Звуковые эффекты Apple</span>
+                    <span className="setting-description">Мягкие щелчки и звон успешного обновления</span>
+                  </div>
+                  <button
+                    className={`mac-action-btn ${soundEnabled ? "copied" : ""}`}
+                    onClick={toggleSound}
+                  >
+                    {soundEnabled ? "Включены (🔔)" : "Выключены (🔕)"}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="settings-group">
+              <span className="settings-group-title">ОКНО WINDOWS 11, СТЕКЛО И ВИДЖЕТЫ</span>
+              <div className="bento-card inset-card">
+                <div className="setting-row">
+                  <div className="setting-label-col">
+                    <span className="setting-name">Эффект прозрачности окна</span>
+                    <span className="setting-description">Нативное стекло DWM без системных рамок Windows</span>
+                  </div>
+                  <div className="backdrop-segmented">
+                    {(["mica", "acrylic", "tabbed", "oled"] as BackdropMode[]).map((mode) => (
+                      <button
+                        key={mode}
+                        type="button"
+                        className={`backdrop-chip ${backdropMode === mode ? "active" : ""}`}
+                        onClick={() => handleSelectBackdrop(mode)}
+                      >
+                        {mode === "mica"
+                          ? "Mica"
+                          : mode === "acrylic"
+                            ? "Acrylic"
+                            : mode === "tabbed"
+                              ? "Tabbed"
+                              : "OLED Black"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="info-divider" style={{ margin: "12px 0" }} />
+
+                <div className="setting-row">
+                  <div className="setting-label-col">
+                    <span className="setting-name">Плавающий Dynamic Island</span>
+                    <span className="setting-description">Компактный виджет поверх всех окон рабочего стола</span>
+                  </div>
+                  <button
+                    type="button"
+                    className="mac-btn-accent"
+                    onClick={toggleIslandMode}
+                  >
+                    Перейти в Островок 🏝️
+                  </button>
+                </div>
+
+                <div className="info-divider" style={{ margin: "12px 0" }} />
+
+                <div className="setting-row">
+                  <div className="setting-label-col">
+                    <span className="setting-name">Apple Share Card & Отчёты</span>
+                    <span className="setting-description">Экспорт PNG-карточки для Telegram, CSV и Markdown</span>
+                  </div>
+                  <button
+                    type="button"
+                    className="mac-action-btn"
+                    onClick={() => {
+                      appleAudio.playTap();
+                      setShareModalOpen(true);
+                    }}
+                  >
+                    <Share2 size={13} />
+                    <span>Открыть экспорт</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="settings-group">
+              <span className="settings-group-title">АВТОР ПРОЕКТА</span>
+              <div className="bento-card inset-card">
+                <TelegramCredit variant="card" />
+              </div>
+            </div>
+
+            <div className="settings-group">
+              <span className="settings-group-title">ОТВЕТ СЕРВЕРА (JSON INSPECTOR)</span>
+              <div className="bento-card raw-json-card">
+                <pre className="raw-json-code">{JSON.stringify(data, null, 2)}</pre>
+              </div>
+            </div>
+          </div>
+        )}
+      </main>
+
+      {/* macOS Subtle Glass Footer */}
+      <footer className="mac-footer">
+        <div className="footer-left-group">
+          <span className="footer-status-text">
+            {lastUpdated ? (
+              <>
+                Обновлено: <strong>{lastUpdated}</strong> • Экономия кэша:{" "}
+                <strong>{cacheHitPct.toFixed(1)}%</strong>
+              </>
+            ) : (
+              "Ожидание первого запроса..."
+            )}
+          </span>
+          <TelegramCredit variant="pill" />
+        </div>
+        <div className="footer-actions-group">
+          <button
+            type="button"
+            className="mac-action-btn"
+            onClick={() => {
+              appleAudio.playTap();
+              setCommandPaletteOpen(true);
+            }}
+            title="Быстрые команды Ctrl+K"
+          >
+            <Command size={12} />
+            <span>Ctrl+K</span>
+          </button>
+          <button
+            type="button"
+            className="mac-action-btn"
+            onClick={() => {
+              appleAudio.playTap();
+              setShareModalOpen(true);
+            }}
+          >
+            <Share2 size={12} />
+            <span>Карточка</span>
+          </button>
+          <button
+            type="button"
+            className={`mac-action-btn ${copied ? "copied" : ""}`}
+            onClick={handleCopyReport}
+          >
+            {copied ? <Check size={12} /> : <Copy size={12} />}
+            <span>{copied ? "Скопировано" : "Сводка"}</span>
+          </button>
+        </div>
+      </footer>
+
+      {/* Spotlight Ctrl+K & Apple Share Card Modals */}
+      <ShareCardModal
+        open={shareModalOpen}
+        onClose={() => setShareModalOpen(false)}
+        data={{
+          mode: data?.mode,
+          status: data?.status,
+          remaining,
+          limit,
+          used,
+          pctRemaining: percent,
+          totalTokens,
+          totalRequests: totalReq,
+          cacheHitPct,
+          savedUsd: totalSaved,
+          avgDurationMs: data?.usage?.average_duration_ms ?? 0,
+          modelStats: data?.model_stats || [],
+          dailyUsage: data?.daily_usage || [],
+        }}
+      />
+
+      <CommandPalette
+        open={commandPaletteOpen}
+        onClose={() => setCommandPaletteOpen(false)}
+        onSelectTab={(t) => handleTabChange(t)}
+        onSearchModel={(mdl) => setModelSearch(mdl)}
+        onRefresh={() => {
+          appleAudio.playTap();
+          loadData();
+        }}
+        onToggleCompact={toggleIslandMode}
+        onOpenShareCard={() => setShareModalOpen(true)}
+        onToggleSound={toggleSound}
+        soundEnabled={soundEnabled}
+        backdropMode={backdropMode}
+        onSelectBackdrop={handleSelectBackdrop}
+        onSignOut={handleSignOut}
+        modelStats={data?.model_stats || []}
+      />
+    </div>
+  );
+}
