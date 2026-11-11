@@ -25,6 +25,10 @@
     <img src="https://img.shields.io/badge/%D0%A1%D0%BA%D0%B0%D1%87%D0%B0%D1%82%D1%8C%20%D0%B4%D0%BB%D1%8F%20Windows%20(v1.2.0)-ffffff?style=for-the-badge&logo=windows11&logoColor=000000" alt="Download Windows" />
   </a>
   &nbsp;
+  <a href="https://afk3drp-dev.github.io/truesota-monitor/">
+    <img src="https://img.shields.io/badge/Live%20%D0%94%D0%B5%D0%BC%D0%BE%20%D0%B8%20%D0%A1%D0%B0%D0%B9%D1%82-09090b?style=for-the-badge&logo=googlechrome&logoColor=ffffff" alt="Live Demo Site" />
+  </a>
+  &nbsp;
   <a href="https://t.me/afk3drp">
     <img src="https://img.shields.io/badge/Telegram-@afk3drp-09090b?style=for-the-badge&logo=telegram&logoColor=29b6f6" alt="Telegram @afk3drp" />
   </a>

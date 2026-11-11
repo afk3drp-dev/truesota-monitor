@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TrueSOTA Usage Monitor — OLED-клиент для Windows 11</title>
+  <meta name="description" content="Настольный OLED-монитор для Windows 11: баланс квоты, расходы по моделям, аудит Prompt Cache, тарифы и системный трей с шифрованием Windows DPAPI." />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="bg-grid" aria-hidden="true"></div>
+
+  <header class="site-nav">
+    <div class="nav-inner">
+      <a href="#top" class="nav-brand">
+        <span class="nav-logo">TS</span>
+        <span>TrueSOTA Monitor</span>
+        <span class="badge-pro">PRO · v1.2.0</span>
+      </a>
+      <nav class="nav-links" aria-label="Навигация по сайту">
+        <a href="#demo">Интерактивное демо</a>
+        <a href="#features">Возможности</a>
+        <a href="#security">Приватность</a>
+        <a href="#download">Скачать</a>
+      </nav>
+      <div class="nav-cta-row">
+        <a class="btn" href="https://github.com/afk3drp-dev/truesota-monitor" target="_blank" rel="noreferrer">GitHub ↗</a>
+        <a class="btn btn-primary" href="#download">Скачать .exe</a>
+      </div>
+    </div>
+  </header>
+
+  <main id="top" class="container">
+    <!-- Hero -->
+    <section class="hero">
+      <div class="eyebrow">
+        <span class="dot-green"></span>
+        <span>v1.2.0 Release · Windows 11 · Tauri v2 + Rust · Windows DPAPI</span>
+      </div>
+      <h1>Контроль квот TrueSOTA.<br /><span>Прямо с рабочего стола.</span></h1>
+      <p class="hero-sub">
+        Нативное приложение в чистой чёрно-белой OLED-эстетике: остаток пакета, экономия Prompt Cache,
+        тарифы моделей, живой статус шлюза, системный трей и алерты Windows — без открытого браузера.
+      </p>
+      <div class="hero-actions">
+        <a class="btn btn-primary btn-lg" href="#download">Скачать для Windows (v1.2.0)</a>
+        <a class="btn btn-lg" href="#demo">Попробовать интерфейс ниже ↓</a>
+        <a class="btn btn-lg" href="https://t.me/afk3drp" target="_blank" rel="noreferrer">@afk3drp ↗</a>
+      </div>
+      <div class="trust-strip">
+        <span class="trust-item">● Без встроенных API-ключей</span>
+        <span class="trust-item">● Шифрование Windows DPAPI</span>
+        <span class="trust-item">● Форматы 620×900 и 1920×1080</span>
+        <span class="trust-item">● Системный трей и уведомления</span>
+      </div>
+    </section>
+
+    <!-- Interactive App Simulator -->
+    <section id="demo" class="demo-section">
+      <div class="demo-toolbar">
+        <span class="demo-hint">Интерактивный симулятор v1.2.0 — кликай по вкладкам, графикам, таблицам и ⌘K</span>
+        <div class="demo-controls">
+          <button type="button" class="demo-pill active" id="ctrlPortrait">620×900 Портрет</button>
+          <button type="button" class="demo-pill" id="ctrlWide">Широкий 16:9</button>
+          <button type="button" class="demo-pill" id="ctrlIsland">Островок (Alt+I)</button>
+          <button type="button" class="demo-pill" id="ctrlPalette">Палитра ⌘K</button>
+          <button type="button" class="demo-pill" id="ctrlWelcome">Экран входа</button>
+        </div>
+      </div>
+
+      <div class="sim-stage">
+        <!-- Dynamic Island Mode -->
+        <div id="simIsland" class="island-wrap hidden">
+          <div class="dynamic-island-pill" id="islandToggleExpand">
+            <span class="dot-green"></span>
+            <strong style="font-size:0.86rem;">42.9%</strong>
+            <span style="color:#a1a1aa;font-size:0.78rem;">$214.65 осталось</span>
+            <span style="padding:2px 8px;border-radius:999px;background:rgba(48,209,88,0.16);color:#5deb81;font-size:0.72rem;font-weight:700;">Сегодня $7.92</span>
+            <button type="button" class="demo-pill active" id="islandExitBtn">Вернуть окно</button>
+          </div>
+          <div id="islandExpandedCard" class="bento-card" style="width:420px;max-width:100%;">
+            <div class="card-kicker">Dynamic Island · Плавающий мини-виджет поверх окон</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px;">
+              <div class="flow-node">
+                <div class="card-kicker">Сегодня (148 запр.)</div>
+                <strong style="font-size:1.05rem;">$7.92 <span class="green-pill">-57%</span></strong>
+              </div>
+              <div class="flow-node">
+                <div class="card-kicker">Prompt Cache</div>
+                <strong style="font-size:1.05rem;color:#30d158;">90.0% · +$327</strong>
+              </div>
+            </div>
+            <p style="font-size:0.74rem;color:#71717a;margin-top:10px;">Нажми <b>«Вернуть окно»</b> или <b>Alt+I</b> чтобы вернуться к полной панели.</p>
+          </div>
+        </div>
+
+        <!-- Main App Window -->
+        <div id="simApp" class="app-window">
+          <header class="app-titlebar">
+            <div class="traffic-lights">
+              <button type="button" class="tl-dot tl-close" id="tlWelcome" title="Экран входа"></button>
+              <button type="button" class="tl-dot tl-min" id="tlIsland" title="Островок (Alt+I)"></button>
+              <button type="button" class="tl-dot tl-max" id="tlSize" title="620×900 / Широкий"></button>
+            </div>
+            <div class="title-center">
+              <span>TrueSOTA</span>
+              <span class="badge-pro">PRO</span>
+              <span class="status-badge"><span class="dot-green"></span><span id="simStatusLabel">active</span></span>
+            </div>
+            <div class="title-actions">
+              <button type="button" class="tb-btn" id="btnCmdOpen" title="Командная палитра (Ctrl+K)">⌘ K</button>
+              <button type="button" class="tb-btn" id="btnIsland" title="Dynamic Island">✦ Островок</button>
+              <button type="button" class="tb-btn" id="btnRefresh" title="Обновить данные">↻</button>
+              <button type="button" class="profile-btn" id="btnProfile" title="Аккаунт и тема">
+                <span class="profile-avatar">TS</span>
+                <span class="profile-pct">43%</span>
+                <span style="color:#a1a1aa;font-size:0.65rem;">⌄</span>
+              </button>
+            </div>
+
+            <!-- Profile Dropdown -->
+            <div id="simProfileMenu" class="sim-dropdown hidden">
+              <div style="display:flex;align-items:center;gap:9px;padding:6px 8px 8px;">
+                <span class="profile-avatar" style="width:28px;height:28px;font-size:0.68rem;">TS</span>
+                <div style="min-width:0;">
+                  <div style="font-size:0.78rem;font-weight:700;">TrueSOTA API</div>
+                  <div style="font-size:0.66rem;color:#a1a1aa;font-family:var(--font-mono);">demo-••••-key · $214.65</div>
+                </div>
+              </div>
+              <div class="sd-sep"></div>
+              <div style="display:flex;justify-content:space-between;align-items:center;padding:5px 8px;">
+                <span style="font-size:0.72rem;color:#a1a1aa;">Стиль фона</span>
+                <div class="sub-pills">
+                  <button type="button" class="sub-pill active" data-backdrop="oled">OLED</button>
+                  <button type="button" class="sub-pill" data-backdrop="acrylic">Acrylic</button>
+                  <button type="button" class="sub-pill" data-backdrop="mica">Mica</button>
+                </div>
+              </div>
+              <div class="sd-sep"></div>
+              <button type="button" class="sd-item" data-nav="settings"><span>⚙ Настройки и трей</span><span style="color:#71717a;">7</span></button>
+              <button type="button" class="sd-item" id="menuShareBtn"><span>↗ Share Card (16:9)</span><span style="color:#71717a;">PNG</span></button>
+              <button type="button" class="sd-item" id="menuUpdateBtn"><span>↓ Проверить обновления</span><span style="color:#30d158;">v1.2.0</span></button>
+              <button type="button" class="sd-item" id="menuDpapiBtn"><span>🔐 Ключ и защита</span><span style="color:#30d158;">DPAPI</span></button>
+              <div class="sd-sep"></div>
+              <button type="button" class="sd-item" id="menuLogoutBtn"><span>↪ Экран входа</span><span style="color:#71717a;">Demo</span></button>
+            </div>
+          </header>
+
+          <!-- SmoothTab Bar (Hidden on Welcome view) -->
+          <div id="simTabsWrap" class="tabs-bar-wrap">
+            <div class="tabs-track" id="simTabsTrack">
+              <div class="tab-indicator" id="tabIndicator"></div>
+              <button type="button" class="tab-btn active" data-tab="overview">Обзор</button>
+              <button type="button" class="tab-btn" data-tab="pricing">Тарифы</button>
+              <button type="button" class="tab-btn" data-tab="monitor">Монитор</button>
+              <button type="button" class="tab-btn" data-tab="analytics">Аналитика</button>
+              <button type="button" class="tab-btn" data-tab="models">Модели <span class="tab-count">7</span></button>
+              <button type="button" class="tab-btn" data-tab="history">История</button>
+              <button type="button" class="tab-btn" data-tab="settings">Настройки</button>
+            </div>
+          </div>
+
+          <!-- Dynamic Simulated Content -->
+          <div id="simViewport" class="app-viewport"></div>
+
+          <footer id="simFooter" class="app-footer">
+            <span>Обновлено: <strong id="simUpdatedAt" style="color:#d4d4d8;">00:26:41</strong> · Кэш: <strong style="color:#d4d4d8;">90.0%</strong> · <a href="https://t.me/afk3drp" target="_blank" rel="noreferrer" style="color:#38bdf8;">@afk3drp ↗</a></span>
+            <div style="display:flex;gap:6px;">
+              <button type="button" class="demo-pill" id="footerCmd">⌘ Ctrl+K</button>
+              <button type="button" class="demo-pill" id="footerShare">Карточка</button>
+              <button type="button" class="demo-pill" id="footerCopy">Сводка</button>
+            </div>
+          </footer>
+
+          <!-- Command Palette Modal -->
+          <div id="simPaletteModal" class="sim-modal-backdrop hidden">
+            <div class="sim-palette">
+              <input id="simPaletteInput" class="sim-palette-input" type="text" placeholder="Поиск команд, вкладок, моделей или размера окна..." />
+              <div id="simPaletteList" class="sim-palette-list"></div>
+            </div>
+          </div>
+
+          <!-- Share Card Preview Modal -->
+          <div id="simShareModal" class="sim-modal-backdrop hidden">
+            <div class="sim-palette" style="max-width:460px;padding:18px;">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                <strong style="font-size:0.86rem;">Apple Share Card (16:9 PNG)</strong>
+                <button type="button" class="copy-btn" id="closeShareBtn">Закрыть</button>
+              </div>
+              <div style="padding:18px;border-radius:14px;background:radial-gradient(circle at 80% 10%,rgba(255,255,255,0.09),transparent 55%),#050507;border:1px solid rgba(255,255,255,0.18);">
+                <div class="card-kicker">TRUESOTA USAGE MONITOR · SUMMARY</div>
+                <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-top:12px;">
+                  <div>
+                    <div style="font-size:0.75rem;color:#a1a1aa;">Сэкономлено кэшем</div>
+                    <div style="font-size:1.75rem;font-weight:800;color:#30d158;">$327.05</div>
+                  </div>
+                  <div style="text-align:right;">
+                    <div style="font-size:0.75rem;color:#a1a1aa;">Остаток квоты</div>
+                    <div style="font-size:1.25rem;font-weight:800;">$214.65 (42.9%)</div>
+                  </div>
+                </div>
+                <div style="margin-top:12px;font-size:0.72rem;color:#71717a;">Cache Hit: 90.0% · 12,480 запросов · 2.84B токенов</div>
+              </div>
+              <div style="margin-top:12px;display:flex;justify-content:flex-end;gap:8px;">
+                <button type="button" class="btn btn-primary" id="saveShareDemoBtn">Скопировать сводку</button>
+              </div>
+            </div>
+          </div>
+
+          <div id="simToast" class="sim-toast hidden"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Features Bento -->
+    <section id="features" class="section">
+      <div class="section-head">
+        <div class="section-kicker">Возможности</div>
+        <h2 class="section-title">Всё нужное для контроля API-квот — в одном нативном окне</h2>
+        <p class="section-desc">Собрано на Tauri v2, React 19 и Rust: весит около 6 МБ, не грузит память как Electron и работает прямо из системного трея Windows.</p>
+      </div>
+      <div class="bento-3">
+        <div class="feature-card">
+          <h3>Квота, RPM/TPM и динамика</h3>
+          <p>Кольцевой индикатор остатка, фактический расход со скидкой, статистика за сегодня/всего, прогноз дней до конца лимита и график за 14 дней.</p>
+        </div>
+        <div class="feature-card">
+          <h3>Аудит Prompt Cache + Heatmap</h3>
+          <p>Тепловая карта активности за 22 недели с переключением режима (<code>$ / Токены / Запросы</code>) и расчёт реальной экономии от кэширования по каждой модели.</p>
+        </div>
+        <div class="feature-card">
+          <h3>Живой каталог тарифов и Monitor</h3>
+          <p>Цены за 1M токенов и коэффициенты групп с <code>true-sota.com/model-pricing</code>, проверка доступных вашему ключу моделей и пинг API-шлюза.</p>
+        </div>
+        <div class="feature-card">
+          <h3>Системный трей и алерты Windows</h3>
+          <p>Сворачивание в трей по <code>×</code>, тихий автозапуск с Windows, остаток квоты в подсказке трея и уведомления при падении баланса ниже порога.</p>
+        </div>
+        <div class="feature-card">
+          <h3>Dynamic Island и Ctrl+K</h3>
+          <p>Плавающий мини-виджет поверх всех окон по <code>Alt+I</code>, мгновенная командная палитра <code>Ctrl+K</code> и переключение <code>620×900</code> ↔ <code>1920×1080</code>.</p>
+        </div>
+        <div class="feature-card">
+          <h3>Экспорт отчётов и обновления</h3>
+          <p>Генератор карточки 16:9 PNG, копирование сводки, экспорт в CSV/Markdown в папку Downloads и проверка свежих релизов на GitHub.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Security & Privacy -->
+    <section id="security" class="section">
+      <div class="section-head">
+        <div class="section-kicker">Безопасность и приватность</div>
+        <h2 class="section-title">Ваш API-ключ никогда не покидает ваш компьютер в открытом виде</h2>
+        <p class="section-desc">В программе нет зашитых или чужих токенов. Исходный код полностью открыт для проверки.</p>
+      </div>
+      <div class="flow-strip">
+        <div class="flow-node">
+          <div class="flow-step">01 · INPUT</div>
+          <h4>Ваш API-ключ</h4>
+          <p>Вы вставляете личный токен при первом входе или меняете его в настройках.</p>
+        </div>
+        <div class="flow-node">
+          <div class="flow-step">02 · ENCRYPT</div>
+          <h4>Windows DPAPI</h4>
+          <p>Rust-бэкенд шифрует ключ через <code>CryptProtectData</code> с привязкой к профилю Windows.</p>
+        </div>
+        <div class="flow-node">
+          <div class="flow-step">03 · STORAGE</div>
+          <h4>%APPDATA%\TrueSOTA_Monitor</h4>
+          <p>На диске лежит только зашифрованный блоб; рядом с <code>.exe</code> ничего не хранится.</p>
+        </div>
+        <div class="flow-node">
+          <div class="flow-step">04 · DIRECT HTTPS</div>
+          <h4>Только TrueSOTA & GitHub</h4>
+          <p>Запросы идут напрямую на <code>true-sota.com</code> и endpoint релизов GitHub.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Download -->
+    <section id="download" class="section">
+      <div class="section-head">
+        <div class="section-kicker">Скачать для Windows 10 / 11 (x64)</div>
+        <h2 class="section-title">Актуальный релиз v1.2.0</h2>
+        <p class="section-desc">Выберите удобный вариант: пакет с установщиками (рекомендуется для автозапуска и ярлыков) или один переносной <code>.exe</code>.</p>
+      </div>
+      <div class="bento-2">
+        <div class="dl-card featured">
+          <div>
+            <span class="badge-pro" style="color:#fff;border-color:rgba(255,255,255,0.3);">РЕКОМЕНДУЕТСЯ · 5.03 MiB</span>
+            <h3 style="font-size:1.2rem;margin-top:12px;">TrueSOTA_Monitor_Installers.zip</h3>
+            <p style="font-size:0.86rem;color:#a1a1aa;margin-top:6px;">Содержит стандартный установщик <code>TrueSOTA_Installer.exe</code> (NSIS), пакет <code>TrueSOTA_Setup.msi</code> и инструкцию <code>README.md</code>.</p>
+          </div>
+          <div>
+            <div style="font-size:0.68rem;color:#71717a;margin-bottom:5px;">SHA-256</div>
+            <div class="sha-box">
+              <span>E2BFB91CB5DA6F9D4DBC129EC5661A8F5006326C75F70DA31B7B44D9988FBA8D</span>
+              <button type="button" class="copy-btn" data-copy="E2BFB91CB5DA6F9D4DBC129EC5661A8F5006326C75F70DA31B7B44D9988FBA8D">Копировать</button>
+            </div>
+            <a class="btn btn-primary btn-lg" style="width:100%;margin-top:14px;" href="https://github.com/afk3drp-dev/truesota-monitor/releases/download/v1.2.0/TrueSOTA_Monitor_Installers.zip">Скачать Installers.zip (v1.2.0)</a>
+          </div>
+        </div>
+
+        <div class="dl-card">
+          <div>
+            <span class="badge-pro">PORTABLE · 6.32 MiB</span>
+            <h3 style="font-size:1.2rem;margin-top:12px;">TrueSOTA_Monitor_Tauri.exe</h3>
+            <p style="font-size:0.86rem;color:#a1a1aa;margin-top:6px;">Запускается мгновенно без установки. Удобно запускать из любой папки; настройки всё равно шифруются в вашем профиле Windows.</p>
+          </div>
+          <div>
+            <div style="font-size:0.68rem;color:#71717a;margin-bottom:5px;">SHA-256</div>
+            <div class="sha-box">
+              <span>30EA9442215A87E080FE3A2A6B09F7B75E92F91A7A57F99E994B9DF3D8C9AF74</span>
+              <button type="button" class="copy-btn" data-copy="30EA9442215A87E080FE3A2A6B09F7B75E92F91A7A57F99E994B9DF3D8C9AF74">Копировать</button>
+            </div>
+            <a class="btn btn-lg" style="width:100%;margin-top:14px;" href="https://github.com/afk3drp-dev/truesota-monitor/releases/download/v1.2.0/TrueSOTA_Monitor_Tauri.exe">Скачать Portable .exe (v1.2.0)</a>
+          </div>
+        </div>
+      </div>
+
+      <details class="faq">
+        <summary>Если Windows SmartScreen показал предупреждение при запуске</summary>
+        <p>Приложение распространяется без платного коммерческого EV-сертификата подписи, поэтому Windows может показать окно «Система защитила ваш компьютер». Нажмите <strong>«Подробнее» → «Выполнить в любом случае»</strong>. Проверить целостность файла можно сверив SHA-256 выше через <code>Get-FileHash</code>.</p>
+      </details>
+
+      <details class="faq">
+        <summary>Самостоятельная сборка из исходников (Node.js 20+ и Rust)</summary>
+        <pre style="font-family:var(--font-mono);color:#d4d4d8;overflow-x:auto;">git clone https://github.com/afk3drp-dev/truesota-monitor.git
+cd truesota-monitor
+npm install
+npm run tauri build</pre>
+      </details>
+    </section>
+
+    <footer class="site-footer">
+      <span>TrueSOTA Usage Monitor · Pure OLED Windows Edition</span>
+      <div style="display:flex;gap:18px;">
+        <a href="https://github.com/afk3drp-dev/truesota-monitor" target="_blank" rel="noreferrer">GitHub</a>
+        <a href="https://github.com/afk3drp-dev/truesota-monitor/releases" target="_blank" rel="noreferrer">Releases</a>
+        <a href="https://t.me/afk3drp" target="_blank" rel="noreferrer">by @afk3drp</a>
+      </div>
+    </footer>
+  </main>
+
+  <script src="./app.js"></script>
+</body>
+</html>
