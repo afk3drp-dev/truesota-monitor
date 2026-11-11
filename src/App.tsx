@@ -3,7 +3,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
-  RefreshCw,
   Copy,
   Check,
   Eye,
@@ -21,7 +20,6 @@ import {
   ChevronUp,
   Volume2,
   VolumeX,
-  Sparkles,
   Layers,
   Zap,
   PiggyBank,
@@ -32,9 +30,7 @@ import {
   Command,
   LogOut,
   Activity,
-  Bell,
   BellOff,
-  Download,
   ShieldCheck,
   Power,
   ArrowUpCircle,
@@ -55,6 +51,20 @@ import { WelcomeAuth } from "./components/WelcomeAuth";
 import { TelegramCredit } from "./components/TelegramCredit";
 import CometDial from "./components/reactbits/CometDial";
 import SpecularButton from "./components/reactbits/SpecularButton";
+import {
+  AnimatedBell,
+  AnimatedDownload,
+  AnimatedRefreshCw,
+  AnimatedSparkles,
+} from "./components/ui/AnimatedIcons";
+import { SmoothTab, type SmoothTabItem } from "./components/ui/SmoothTab";
+import { ProfileDropdown } from "./components/ui/ProfileDropdown";
+import {
+  Accordion,
+  AccordionItem,
+  AccordionTrigger,
+  AccordionPanel,
+} from "./components/ui/Accordion";
 import { appleAudio } from "./utils/audio";
 import "./App.css";
 
@@ -136,6 +146,8 @@ interface NativeSettingsState {
   autostart: boolean;
 }
 
+type WindowLayout = "portrait" | "fullscreen" | "wide" | "compact_win";
+
 interface UpdateCheckResult {
   current_version: string;
   latest_version: string;
@@ -182,7 +194,7 @@ export default function App() {
     if (saved === "mica" || saved === "acrylic" || saved === "tabbed" || saved === "oled") {
       return saved;
     }
-    return "mica";
+    return "oled";
   });
   const [commandPaletteOpen, setCommandPaletteOpen] = useState<boolean>(false);
   const [shareModalOpen, setShareModalOpen] = useState<boolean>(false);
@@ -212,12 +224,26 @@ export default function App() {
   const [updateError, setUpdateError] = useState<string | null>(null);
   const [updateDismissed, setUpdateDismissed] = useState<boolean>(false);
   const [monitorSyncTick, setMonitorSyncTick] = useState<number>(0);
+  const [windowLayout, setWindowLayout] = useState<WindowLayout>(() => {
+    const saved = localStorage.getItem("truesota_window_layout");
+    if (
+      saved === "portrait" ||
+      saved === "fullscreen" ||
+      saved === "wide" ||
+      saved === "compact_win"
+    ) {
+      return saved;
+    }
+    return "portrait";
+  });
+  const [isWindowMaximized, setIsWindowMaximized] = useState<boolean>(false);
 
   const lowAlertFiredRef = useRef<boolean>(false);
   const lastGatewayOkRef = useRef<boolean | null>(null);
   const lastGatewayAlertAtRef = useRef<number>(0);
   const loadDataRef = useRef<(() => void) | null>(null);
   const toggleIslandRef = useRef<(() => void) | null>(null);
+  const viewportRef = useRef<HTMLElement | null>(null);
 
   // Initialize API Key, DPAPI Status, Native Preferences & Backdrop Material
   useEffect(() => {
@@ -250,8 +276,29 @@ export default function App() {
       } catch (e) {
         console.warn("Vibrancy unsupported on host OS", e);
       }
+      try {
+        if (windowLayout !== "fullscreen") {
+          const isMax = await invoke<boolean>("set_window_layout", { layout: windowLayout });
+          setIsWindowMaximized(isMax);
+        } else {
+          const isMax = await invoke<boolean>("get_window_is_maximized");
+          setIsWindowMaximized(isMax);
+        }
+      } catch {
+        // running outside Tauri webview (browser preview)
+      }
     }
     initApp();
+
+    const syncMaxState = () => {
+      void invoke<boolean>("get_window_is_maximized")
+        .then((isMax) => setIsWindowMaximized(isMax))
+        .catch(() => {});
+    };
+    window.addEventListener("resize", syncMaxState);
+    return () => {
+      window.removeEventListener("resize", syncMaxState);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -486,6 +533,42 @@ export default function App() {
     }
   };
 
+  const handleToggleMaximize = async () => {
+    appleAudio.playTap();
+    try {
+      const nowMax = await invoke<boolean>("window_toggle_maximize");
+      setIsWindowMaximized(nowMax);
+      const nextLayout: WindowLayout = nowMax ? "fullscreen" : "portrait";
+      setWindowLayout(nextLayout);
+      localStorage.setItem("truesota_window_layout", nextLayout);
+      setMonitorSyncTick((n) => n + 1);
+    } catch (e) {
+      console.error("Failed to toggle maximize", e);
+    }
+  };
+
+  const handleSelectWindowLayout = async (layout: WindowLayout) => {
+    appleAudio.playTap();
+    setWindowLayout(layout);
+    localStorage.setItem("truesota_window_layout", layout);
+    if (isIslandMode) return;
+    try {
+      const nowMax = await invoke<boolean>("set_window_layout", { layout });
+      setIsWindowMaximized(nowMax);
+      setMonitorSyncTick((n) => n + 1);
+    } catch (e) {
+      console.error("Failed to apply window layout", e);
+    }
+  };
+
+  const handleTitlebarDoubleClick = (e: React.MouseEvent<HTMLElement>) => {
+    const target = e.target as HTMLElement | null;
+    if (target?.closest("button, input, select, a, .backdrop-segmented")) {
+      return;
+    }
+    void handleToggleMaximize();
+  };
+
   const toggleIslandMode = async () => {
     appleAudio.playSwitch();
     const next = !isIslandMode;
@@ -494,12 +577,18 @@ export default function App() {
     if (next) {
       setCommandPaletteOpen(false);
       setShareModalOpen(false);
+      setIsWindowMaximized(false);
     }
     try {
-      await invoke("set_window_mode", {
+      const nowMax = await invoke<boolean>("set_window_mode", {
         mode: next ? "compact" : "normal",
         vibrancy: next ? null : backdropMode === "oled" ? "none" : backdropMode,
+        layout: next ? null : windowLayout,
       });
+      if (!next) {
+        setIsWindowMaximized(nowMax);
+        setMonitorSyncTick((n) => n + 1);
+      }
     } catch (e) {
       console.error("Failed to set window mode", e);
     }
@@ -545,6 +634,7 @@ export default function App() {
   const handleTabChange = (tab: AppTab) => {
     appleAudio.playTap();
     setActiveTab(tab);
+    viewportRef.current?.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const handleSaveKey = async () => {
@@ -698,6 +788,87 @@ export default function App() {
     );
   }, [data]);
 
+  const keyMasked = useMemo(() => {
+    const trimmed = apiKey.trim();
+    if (!trimmed) return "No Key";
+    if (trimmed.length <= 10) return `${trimmed.slice(0, 3)}•••`;
+    return `${trimmed.slice(0, 5)}•••${trimmed.slice(-4)}`;
+  }, [apiKey]);
+
+  const navTabItems = useMemo<SmoothTabItem[]>(
+    () => [
+      { id: "overview", title: "Обзор", icon: <TrendingUp size={13} /> },
+      { id: "pricing", title: "Тарифы", icon: <Layers size={13} /> },
+      { id: "monitor", title: "Монитор", icon: <Activity size={13} /> },
+      { id: "analytics", title: "Аналитика", icon: <Calendar size={13} /> },
+      {
+        id: "models",
+        title: "Модели",
+        icon: <Cpu size={13} />,
+        badge: topModels.length > 0 ? topModels.length : undefined,
+      },
+      { id: "history", title: "История", icon: <BarChart3 size={13} /> },
+      { id: "settings", title: "Настройки", icon: <SlidersHorizontal size={13} /> },
+    ],
+    [topModels.length]
+  );
+
+  const renderBarsTrack = useCallback(
+    (metric: "cost" | "requests" | "tokens") => {
+      const peak = Math.max(
+        ...chartDays.map((d) =>
+          metric === "requests"
+            ? d.requests || 0
+            : metric === "tokens"
+              ? d.total_tokens || 0
+              : d.actual_cost ?? d.cost ?? 0
+        ),
+        0.01
+      );
+      return (
+        <div className="bars-track-area">
+          {chartDays.map((d) => {
+            const val =
+              metric === "requests"
+                ? d.requests || 0
+                : metric === "tokens"
+                  ? d.total_tokens || 0
+                  : d.actual_cost ?? d.cost ?? 0;
+            const heightPct = Math.max(8, Math.min(100, (val / peak) * 100));
+            const isToday = d.date === chartDays[chartDays.length - 1]?.date;
+            const isHovered = hoveredDay?.date === d.date;
+            return (
+              <div
+                key={d.date}
+                className={`chart-bar-col ${isHovered ? "active" : ""}`}
+                onMouseEnter={() => setHoveredDay(d)}
+                onMouseLeave={() => setHoveredDay(null)}
+              >
+                <div className="bar-pillar-wrap">
+                  <div
+                    className={`bar-pillar ${isToday ? "today" : ""}`}
+                    style={{ height: `${heightPct}%` }}
+                  />
+                </div>
+                <span className="bar-date-label">{d.date.slice(5)}</span>
+              </div>
+            );
+          })}
+        </div>
+      );
+    },
+    [chartDays, hoveredDay]
+  );
+
+  const chartSwipeItems = useMemo<SmoothTabItem[]>(
+    () => [
+      { id: "cost", title: "Расход $", content: renderBarsTrack("cost") },
+      { id: "requests", title: "Запросы", content: renderBarsTrack("requests") },
+      { id: "tokens", title: "Токены", content: renderBarsTrack("tokens") },
+    ],
+    [renderBarsTrack]
+  );
+
   const availableProviders = useMemo(() => {
     const map = new Map<string, string>();
     for (const m of topModels) {
@@ -773,7 +944,7 @@ export default function App() {
                 }}
                 title="Обновить"
               >
-                <RefreshCw size={12} />
+                <AnimatedRefreshCw size={12} spinning={loading} />
               </button>
               <button
                 className="island-btn expand-btn"
@@ -834,12 +1005,12 @@ export default function App() {
   // ========================================================
   if (!keyLoaded) {
     return (
-      <div className={`apple-window backdrop-${backdropMode}`}>
-        <header className="mac-titlebar" data-tauri-drag-region>
+      <div className={`apple-window backdrop-${backdropMode} ${isWindowMaximized ? "maximized" : ""}`}>
+        <header className="mac-titlebar" data-tauri-drag-region onDoubleClick={handleTitlebarDoubleClick}>
           <div className="traffic-lights" onMouseDown={(e) => e.stopPropagation()}>
             <button type="button" className="light close" onClick={() => invoke("window_close")}><span>×</span></button>
             <button type="button" className="light minimize" onClick={() => invoke("window_minimize")}><span>−</span></button>
-            <button type="button" className="light zoom" onClick={() => invoke("window_toggle_maximize")}><span>+</span></button>
+            <button type="button" className="light zoom" onClick={() => void handleToggleMaximize()}><span>+</span></button>
           </div>
           <div className="titlebar-center" data-tauri-drag-region>
             <span className="app-title-text">TrueSOTA</span>
@@ -853,8 +1024,12 @@ export default function App() {
 
   if (!apiKey) {
     return (
-      <div className={`apple-window backdrop-${backdropMode}`}>
-        <header className="mac-titlebar welcome-titlebar" data-tauri-drag-region>
+      <div className={`apple-window backdrop-${backdropMode} ${isWindowMaximized ? "maximized" : ""}`}>
+        <header
+          className="mac-titlebar welcome-titlebar"
+          data-tauri-drag-region
+          onDoubleClick={handleTitlebarDoubleClick}
+        >
           <div className="traffic-lights" onMouseDown={(e) => e.stopPropagation()}>
             <button
               type="button"
@@ -875,8 +1050,8 @@ export default function App() {
             <button
               type="button"
               className="light zoom"
-              title="На весь экран"
-              onClick={() => invoke("window_toggle_maximize")}
+              title={isWindowMaximized ? "Восстановить окно" : "На весь экран (1920×1080)"}
+              onClick={() => void handleToggleMaximize()}
             >
               <span>+</span>
             </button>
@@ -917,9 +1092,13 @@ export default function App() {
   // 2. Full macOS Apple Dark Window Rendering
   // ========================================================
   return (
-    <div className={`apple-window backdrop-${backdropMode}`}>
+    <div className={`apple-window backdrop-${backdropMode} ${isWindowMaximized ? "maximized" : ""}`}>
       {/* macOS Unified Frameless Titlebar */}
-      <header className="mac-titlebar" data-tauri-drag-region>
+      <header
+        className="mac-titlebar"
+        data-tauri-drag-region
+        onDoubleClick={handleTitlebarDoubleClick}
+      >
         <div
           className="traffic-lights"
           onMouseDown={(e) => e.stopPropagation()}
@@ -943,8 +1122,8 @@ export default function App() {
           <button
             type="button"
             className="light zoom"
-            title="На весь экран"
-            onClick={() => invoke("window_toggle_maximize")}
+            title={isWindowMaximized ? "Восстановить окно" : "На весь экран (1920×1080)"}
+            onClick={() => void handleToggleMaximize()}
           >
             <span>+</span>
           </button>
@@ -992,7 +1171,7 @@ export default function App() {
 
           <button
             type="button"
-            className="mac-icon-btn"
+            className="mac-icon-btn titlebar-desktop-only"
             onClick={() => {
               appleAudio.playTap();
               setShareModalOpen(true);
@@ -1008,13 +1187,13 @@ export default function App() {
             onClick={toggleIslandMode}
             title="Переключить в плавающий мини-виджет Dynamic Island"
           >
-            <Sparkles size={13} color="#ff9f0a" />
+            <AnimatedSparkles size={13} />
             <span>Островок</span>
           </button>
 
           <button
             type="button"
-            className={`sound-toggle-btn ${!soundEnabled ? "muted" : ""}`}
+            className={`sound-toggle-btn titlebar-desktop-only ${!soundEnabled ? "muted" : ""}`}
             onClick={toggleSound}
             title={soundEnabled ? "Звуки включены" : "Звуки выключены"}
           >
@@ -1023,7 +1202,7 @@ export default function App() {
 
           <button
             type="button"
-            className={`mac-icon-btn ${copied ? "success" : ""}`}
+            className={`mac-icon-btn titlebar-desktop-only ${copied ? "success" : ""}`}
             onClick={handleCopyReport}
             title="Скопировать сводку"
           >
@@ -1032,7 +1211,7 @@ export default function App() {
 
           <button
             type="button"
-            className={`mac-icon-btn ${loading ? "spinning" : ""}`}
+            className="mac-icon-btn"
             onClick={() => {
               appleAudio.playTap();
               loadData();
@@ -1040,76 +1219,53 @@ export default function App() {
             disabled={loading}
             title="Обновить данные"
           >
-            <RefreshCw size={14} />
+            <AnimatedRefreshCw size={14} spinning={loading} />
           </button>
+
+          <ProfileDropdown
+            keyMasked={keyMasked}
+            statusText={data?.status || "active"}
+            isHealthy={!error && (data?.isValid ?? true)}
+            quotaPercent={percent}
+            quotaLeftText={`$${remaining.toFixed(2)}`}
+            backdropMode={backdropMode}
+            onSelectBackdrop={handleSelectBackdrop}
+            appVersion={updateInfo?.current_version || "1.2.0"}
+            updateAvailableVersion={
+              updateInfo?.has_update ? updateInfo.latest_version : null
+            }
+            dpapiActive={keyStorage.protected}
+            onOpenSettings={() => handleTabChange("settings")}
+            onOpenShareCard={() => setShareModalOpen(true)}
+            onCheckUpdates={() => {
+              handleTabChange("settings");
+              void handleCheckUpdates(false);
+            }}
+            onHideToTray={() => void invoke("window_hide_to_tray")}
+            onCopyKey={() => {
+              if (apiKey.trim()) {
+                void navigator.clipboard.writeText(apiKey.trim());
+              }
+            }}
+            onSignOut={handleSignOut}
+          />
         </div>
       </header>
 
-      {/* macOS Segmented Control Tabs */}
+      {/* Navigation Tabs */}
       <div className="segmented-wrapper">
-        <div className="mac-segmented-control">
-          <button
-            type="button"
-            className={`segment ${activeTab === "overview" ? "active" : ""}`}
-            onClick={() => handleTabChange("overview")}
-          >
-            <TrendingUp size={13} />
-            <span>Обзор</span>
-          </button>
-          <button
-            type="button"
-            className={`segment ${activeTab === "pricing" ? "active" : ""}`}
-            onClick={() => handleTabChange("pricing")}
-          >
-            <Layers size={13} />
-            <span>Тарифы</span>
-          </button>
-          <button
-            type="button"
-            className={`segment ${activeTab === "monitor" ? "active" : ""}`}
-            onClick={() => handleTabChange("monitor")}
-          >
-            <Activity size={13} />
-            <span>Монитор</span>
-          </button>
-          <button
-            type="button"
-            className={`segment ${activeTab === "analytics" ? "active" : ""}`}
-            onClick={() => handleTabChange("analytics")}
-          >
-            <Calendar size={13} />
-            <span>Аналитика</span>
-          </button>
-          <button
-            type="button"
-            className={`segment ${activeTab === "models" ? "active" : ""}`}
-            onClick={() => handleTabChange("models")}
-          >
-            <Cpu size={13} />
-            <span>Модели</span>
-            {topModels.length > 0 && <span className="tab-pill">{topModels.length}</span>}
-          </button>
-          <button
-            type="button"
-            className={`segment ${activeTab === "history" ? "active" : ""}`}
-            onClick={() => handleTabChange("history")}
-          >
-            <BarChart3 size={13} />
-            <span>История</span>
-          </button>
-          <button
-            type="button"
-            className={`segment ${activeTab === "settings" ? "active" : ""}`}
-            onClick={() => handleTabChange("settings")}
-          >
-            <SlidersHorizontal size={13} />
-            <span>Настройки</span>
-          </button>
-        </div>
+        <SmoothTab
+          barOnly
+          variant="nav"
+          label="Разделы TrueSOTA Monitor"
+          items={navTabItems}
+          value={activeTab}
+          onChange={(tabId) => handleTabChange(tabId as AppTab)}
+        />
       </div>
 
       {/* Main Content Area */}
-      <main className="mac-viewport">
+      <main className="mac-viewport" ref={viewportRef}>
         {updateInfo?.has_update && !updateDismissed && (
           <div className="toast-banner update">
             <ArrowUpCircle size={15} />
@@ -1122,7 +1278,7 @@ export default function App() {
               className="update-banner-btn"
               onClick={handleOpenUpdateRelease}
             >
-              <Download size={12} />
+              <AnimatedDownload size={12} />
               <span>Скачать</span>
             </button>
             <button
@@ -1312,103 +1468,50 @@ export default function App() {
               </div>
             </div>
 
-            {/* 14-Day Interactive Spend Trend Chart */}
-            <div className="bento-card chart-card">
-              <div className="chart-header">
-                <div className="chart-title-wrap">
-                  <div className="chart-header-left">
+            {/* Widescreen 2-Column Bottom Bento: 14-Day Dynamics + Top Models */}
+            <div className="overview-bottom-grid">
+              {/* 14-Day Interactive Swipe Spend Trend Chart */}
+              <div className="bento-card chart-card">
+                <SmoothTab
+                  variant="compact"
+                  label="Метрика графика за 14 дней"
+                  items={chartSwipeItems}
+                  value={chartMetric}
+                  onChange={(id) => {
+                    appleAudio.playTap();
+                    setChartMetric(id as "cost" | "requests" | "tokens");
+                  }}
+                  headerLeft={
                     <span className="card-subhead">Динамика (14 дней)</span>
-                    <div className="chart-metric-pills">
-                      <button
-                        className={`chart-metric-btn ${chartMetric === "cost" ? "active" : ""}`}
-                        onClick={() => {
-                          appleAudio.playTap();
-                          setChartMetric("cost");
-                        }}
-                      >
-                        Расход $
-                      </button>
-                      <button
-                        className={`chart-metric-btn ${chartMetric === "requests" ? "active" : ""}`}
-                        onClick={() => {
-                          appleAudio.playTap();
-                          setChartMetric("requests");
-                        }}
-                      >
-                        Запросы
-                      </button>
-                      <button
-                        className={`chart-metric-btn ${chartMetric === "tokens" ? "active" : ""}`}
-                        onClick={() => {
-                          appleAudio.playTap();
-                          setChartMetric("tokens");
-                        }}
-                      >
-                        Токены
-                      </button>
+                  }
+                  headerRight={
+                    <div className="chart-hover-pill">
+                      {hoveredDay ? (
+                        <span>
+                          {hoveredDay.date}:{" "}
+                          <strong>
+                            $
+                            {(hoveredDay.actual_cost ?? hoveredDay.cost ?? 0).toFixed(2)}
+                          </strong>{" "}
+                          • {hoveredDay.requests} зап. •{" "}
+                          {formatNumber(hoveredDay.total_tokens)} ток.
+                        </span>
+                      ) : (
+                        <span>
+                          Пик:{" "}
+                          <strong>
+                            {chartMetric === "cost"
+                              ? `$${maxChartValue.toFixed(2)}`
+                              : chartMetric === "requests"
+                                ? `${Math.round(maxChartValue)} зап.`
+                                : formatNumber(maxChartValue)}
+                          </strong>
+                        </span>
+                      )}
                     </div>
-                  </div>
-
-                  <div className="chart-hover-pill">
-                    {hoveredDay ? (
-                      <span>
-                        {hoveredDay.date}:{" "}
-                        <strong>${(hoveredDay.actual_cost ?? hoveredDay.cost ?? 0).toFixed(2)}</strong> •{" "}
-                        {hoveredDay.requests} зап. • {formatNumber(hoveredDay.total_tokens)} ток.
-                      </span>
-                    ) : (
-                      <span>
-                        Пик:{" "}
-                        <strong>
-                          {chartMetric === "cost"
-                            ? `$${maxChartValue.toFixed(2)}`
-                            : chartMetric === "requests"
-                            ? `${Math.round(maxChartValue)} зап.`
-                            : formatNumber(maxChartValue)}
-                        </strong>
-                      </span>
-                    )}
-                  </div>
-                </div>
+                  }
+                />
               </div>
-
-              <div className="bars-track-area">
-                {chartDays.map((d) => {
-                  const val =
-                    chartMetric === "requests"
-                      ? d.requests || 0
-                      : chartMetric === "tokens"
-                      ? d.total_tokens || 0
-                      : d.actual_cost ?? d.cost ?? 0;
-                  const heightPct = Math.max(8, Math.min(100, (val / (maxChartValue || 1)) * 100));
-                  const isToday = d.date === chartDays[chartDays.length - 1]?.date;
-                  const isHovered = hoveredDay?.date === d.date;
-                  return (
-                    <div
-                      key={d.date}
-                      className={`chart-bar-col ${isHovered ? "active" : ""}`}
-                      onMouseEnter={() => setHoveredDay(d)}
-                      onMouseLeave={() => setHoveredDay(null)}
-                    >
-                      <div className="bar-pillar-wrap">
-                        <div
-                          className={`bar-pillar ${isToday ? "today" : ""}`}
-                          style={{
-                            height: `${heightPct}%`,
-                            background: isToday
-                              ? "var(--apple-green)"
-                              : isHovered
-                              ? "var(--apple-blue)"
-                              : undefined,
-                          }}
-                        />
-                      </div>
-                      <span className="bar-date-label">{d.date.slice(5)}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
 
             {/* Top Models Preview Card with AI Logos */}
             {topModels.length > 0 && (
@@ -1422,7 +1525,7 @@ export default function App() {
                 </div>
 
                 <div className="models-mini-list">
-                  {topModels.slice(0, 4).map((item) => {
+                  {topModels.slice(0, 6).map((item) => {
                     const actual = item.actual_cost ?? item.cost ?? 0;
                     const nominal = item.cost || actual;
                     const sharePct = totalCost > 0 ? (actual / totalCost) * 100 : 0;
@@ -1464,6 +1567,7 @@ export default function App() {
                 </div>
               </div>
             )}
+            </div>
           </div>
         )}
 
@@ -1662,380 +1766,512 @@ export default function App() {
         {/* TAB 4: SETTINGS */}
         {activeTab === "settings" && (
           <div className="settings-view">
-            <div className="settings-group">
-              <span className="settings-group-title">КОНФИГУРАЦИЯ API И ИНТЕРФЕЙСА</span>
-              <div className="bento-card inset-card">
-                <div className="setting-row">
-                  <div className="setting-label-col">
-                    <span className="setting-name">TrueSOTA API Key</span>
-                    <span className="setting-description">
-                      Токен доступа к API •{" "}
-                      <strong style={{ color: "var(--apple-green)" }}>
-                        {keyStorage.method}
-                      </strong>
-                    </span>
-                  </div>
-                  <div className="setting-input-wrap">
-                    <div className="mac-input-box">
-                      <input
-                        type={showKey ? "text" : "password"}
-                        value={keyInput}
-                        onChange={(e) => setKeyInput(e.target.value)}
-                        placeholder="Вставьте ваш API ключ..."
-                        className="mac-key-input"
-                      />
-                      <button
-                        type="button"
-                        className="key-eye-btn"
-                        onClick={() => setShowKey(!showKey)}
-                      >
-                        {showKey ? <EyeOff size={14} /> : <Eye size={14} />}
-                      </button>
-                    </div>
-                    <SpecularButton
-                      type="button"
-                      size="sm"
-                      radius={9}
-                      tint="#0a84ff"
-                      tintOpacity={0.22}
-                      lineColor="#7dd3fc"
-                      baseColor="#1e3a8a"
-                      onClick={handleSaveKey}
+            <div className="settings-columns">
+              <div className="settings-col">
+                <Accordion multiple defaultOpen={["api", "tray"]}>
+                  <AccordionItem value="api">
+                    <AccordionTrigger
+                      icon={<SlidersHorizontal size={14} />}
+                      meta={keyMasked}
                     >
-                      Сохранить
-                    </SpecularButton>
-                    <button
-                      type="button"
-                      className="mac-action-btn signout-btn"
-                      onClick={handleSignOut}
-                      title="Удалить ключ и выйти на экран приветствия"
-                    >
-                      <LogOut size={13} />
-                      <span>Выйти</span>
-                    </button>
-                  </div>
-                </div>
+                      Конфигурация API и интерфейса
+                    </AccordionTrigger>
+                    <AccordionPanel>
+                      <div className="setting-row">
+                        <div className="setting-label-col">
+                          <span className="setting-name">TrueSOTA API Key</span>
+                          <span className="setting-description">
+                            Токен доступа к API •{" "}
+                            <strong style={{ color: "var(--apple-green)" }}>
+                              {keyStorage.method}
+                            </strong>
+                          </span>
+                        </div>
+                        <div className="setting-input-wrap">
+                          <div className="mac-input-box">
+                            <input
+                              type={showKey ? "text" : "password"}
+                              value={keyInput}
+                              onChange={(e) => setKeyInput(e.target.value)}
+                              placeholder="Вставьте ваш API ключ..."
+                              className="mac-key-input"
+                            />
+                            <button
+                              type="button"
+                              className="key-eye-btn"
+                              onClick={() => setShowKey(!showKey)}
+                            >
+                              {showKey ? <EyeOff size={14} /> : <Eye size={14} />}
+                            </button>
+                          </div>
+                          <SpecularButton
+                            type="button"
+                            size="sm"
+                            radius={9}
+                            tint="#ffffff"
+                            tintOpacity={0.16}
+                            lineColor="#ffffff"
+                            baseColor="#141417"
+                            onClick={handleSaveKey}
+                          >
+                            Сохранить
+                          </SpecularButton>
+                          <button
+                            type="button"
+                            className="mac-action-btn signout-btn"
+                            onClick={handleSignOut}
+                            title="Удалить ключ и выйти на экран приветствия"
+                          >
+                            <LogOut size={13} />
+                            <span>Выйти</span>
+                          </button>
+                        </div>
+                      </div>
 
-                <div className="info-divider" style={{ margin: "12px 0" }} />
+                      <div className="info-divider" style={{ margin: "12px 0" }} />
 
-                <div className="setting-row comet-setting-row">
-                  <div className="setting-label-col">
-                    <span className="setting-name">Интервал автообновления (CometDial)</span>
-                    <span className="setting-description">
-                      Покрутите шкалу или выберите пресет • Сейчас:{" "}
-                      <strong>
-                        {autoRefreshInterval <= 0
-                          ? "Выключено"
-                          : `${Math.round(autoRefreshInterval / 1000)} сек`}
-                      </strong>
-                    </span>
-                    <div className="backdrop-segmented" style={{ marginTop: "8px" }}>
-                      {[
-                        { ms: 0, label: "Выкл" },
-                        { ms: 30000, label: "30с" },
-                        { ms: 60000, label: "60с" },
-                        { ms: 180000, label: "3м" },
-                      ].map((p) => (
+                      <div className="setting-row comet-setting-row">
+                        <div className="setting-label-col">
+                          <span className="setting-name">
+                            Интервал автообновления (CometDial)
+                          </span>
+                          <span className="setting-description">
+                            Покрутите шкалу или выберите пресет • Сейчас:{" "}
+                            <strong>
+                              {autoRefreshInterval <= 0
+                                ? "Выключено"
+                                : `${Math.round(autoRefreshInterval / 1000)} сек`}
+                            </strong>
+                          </span>
+                          <div className="backdrop-segmented" style={{ marginTop: "8px" }}>
+                            {[
+                              { ms: 0, label: "Выкл" },
+                              { ms: 30000, label: "30с" },
+                              { ms: 60000, label: "60с" },
+                              { ms: 180000, label: "3м" },
+                            ].map((p) => (
+                              <button
+                                key={p.ms}
+                                type="button"
+                                className={`backdrop-chip ${autoRefreshInterval === p.ms ? "active" : ""}`}
+                                onClick={() => {
+                                  appleAudio.playTap();
+                                  setAutoRefreshInterval(p.ms);
+                                }}
+                              >
+                                {p.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="comet-dial-wrap">
+                          <CometDial
+                            value={Math.round(autoRefreshInterval / 1000)}
+                            min={0}
+                            max={300}
+                            step={15}
+                            unit="с"
+                            size={112}
+                            thickness={9}
+                            accent="#ffffff"
+                            ink="#ffffff"
+                            onChange={(sec) => setAutoRefreshInterval(sec * 1000)}
+                            onChangeEnd={() => appleAudio.playTap()}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="info-divider" style={{ margin: "12px 0" }} />
+
+                      <div className="setting-row">
+                        <div className="setting-label-col">
+                          <span className="setting-name">Звуковые эффекты интерфейса</span>
+                          <span className="setting-description">
+                            Мягкие щелчки и звон успешного обновления
+                          </span>
+                        </div>
                         <button
-                          key={p.ms}
                           type="button"
-                          className={`backdrop-chip ${autoRefreshInterval === p.ms ? "active" : ""}`}
-                          onClick={() => {
-                            appleAudio.playTap();
-                            setAutoRefreshInterval(p.ms);
+                          className={`mac-action-btn ${soundEnabled ? "copied" : ""}`}
+                          onClick={toggleSound}
+                        >
+                          {soundEnabled ? <Volume2 size={13} /> : <VolumeX size={13} />}
+                          <span>{soundEnabled ? "Включены" : "Выключены"}</span>
+                        </button>
+                      </div>
+                    </AccordionPanel>
+                  </AccordionItem>
+
+                  <AccordionItem value="tray">
+                    <AccordionTrigger
+                      icon={<AnimatedBell size={14} active={gatewayAlertEnabled} />}
+                      meta={nativePrefs.autostart ? "Автозапуск: Вкл" : "В трее"}
+                    >
+                      Системный трей, автозапуск и алерты
+                    </AccordionTrigger>
+                    <AccordionPanel>
+                      <div className="setting-row">
+                        <div className="setting-label-col">
+                          <span className="setting-name">Запускать вместе с Windows</span>
+                          <span className="setting-description">
+                            Тихий старт в системном трее при входе в Windows
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          className={`mac-action-btn ${nativePrefs.autostart ? "copied" : ""}`}
+                          onClick={handleToggleAutostart}
+                        >
+                          <Power size={13} />
+                          <span>{nativePrefs.autostart ? "Включён" : "Выключен"}</span>
+                        </button>
+                      </div>
+
+                      <div className="info-divider" style={{ margin: "12px 0" }} />
+
+                      <div className="setting-row">
+                        <div className="setting-label-col">
+                          <span className="setting-name">
+                            Сворачивать в трей при закрытии (×)
+                          </span>
+                          <span className="setting-description">
+                            Мониторинг и баланс остаются в трее около часов Windows
+                          </span>
+                        </div>
+                        <div
+                          style={{
+                            display: "flex",
+                            gap: "8px",
+                            flexWrap: "wrap",
+                            justifyContent: "flex-end",
                           }}
                         >
-                          {p.label}
+                          <button
+                            type="button"
+                            className={`mac-action-btn ${nativePrefs.close_to_tray ? "copied" : ""}`}
+                            onClick={handleToggleCloseToTray}
+                          >
+                            <span>
+                              {nativePrefs.close_to_tray ? "Включено" : "Выключено"}
+                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            className="mac-action-btn"
+                            onClick={() => void invoke("window_hide_to_tray")}
+                            title="Свернуть окно в трей прямо сейчас"
+                          >
+                            <span>В трей</span>
+                          </button>
+                          <button
+                            type="button"
+                            className="mac-action-btn signout-btn"
+                            onClick={() => void invoke("window_quit")}
+                            title="Полностью закрыть программу"
+                          >
+                            <Power size={13} />
+                            <span>Выйти</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="info-divider" style={{ margin: "12px 0" }} />
+
+                      <div className="setting-row">
+                        <div className="setting-label-col">
+                          <span className="setting-name">
+                            Уведомление при низком остатке квоты
+                          </span>
+                          <span className="setting-description">
+                            Windows-алерт при падении остатка ниже выбранного порога
+                          </span>
+                        </div>
+                        <div className="backdrop-segmented">
+                          {[
+                            { pct: 0, label: "Выкл" },
+                            { pct: 25, label: "< 25%" },
+                            { pct: 15, label: "< 15%" },
+                            { pct: 10, label: "< 10%" },
+                            { pct: 5, label: "< 5%" },
+                          ].map((opt) => (
+                            <button
+                              key={opt.pct}
+                              type="button"
+                              className={`backdrop-chip ${alertThresholdPct === opt.pct ? "active" : ""}`}
+                              onClick={() => handleSelectAlertThreshold(opt.pct)}
+                            >
+                              {opt.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="info-divider" style={{ margin: "12px 0" }} />
+
+                      <div className="setting-row">
+                        <div className="setting-label-col">
+                          <span className="setting-name">
+                            Алерт при сбое или восстановлении API
+                          </span>
+                          <span className="setting-description">
+                            Уведомления Windows при потере связи со шлюзом TrueSOTA
+                          </span>
+                        </div>
+                        <div style={{ display: "flex", gap: "8px" }}>
+                          <button
+                            type="button"
+                            className={`mac-action-btn ${gatewayAlertEnabled ? "copied" : ""}`}
+                            onClick={handleToggleGatewayAlert}
+                          >
+                            {gatewayAlertEnabled ? (
+                              <AnimatedBell size={13} active={gatewayAlertEnabled} />
+                            ) : (
+                              <BellOff size={13} />
+                            )}
+                            <span>{gatewayAlertEnabled ? "Включены" : "Выключены"}</span>
+                          </button>
+                          <button
+                            type="button"
+                            className="mac-action-btn"
+                            onClick={handleTestNotification}
+                            title="Отправить тестовое уведомление Windows"
+                          >
+                            <span>Тест</span>
+                          </button>
+                        </div>
+                      </div>
+                    </AccordionPanel>
+                  </AccordionItem>
+                </Accordion>
+              </div>
+
+              <div className="settings-col">
+                <Accordion multiple defaultOpen={["window", "security"]}>
+                  <AccordionItem value="window">
+                    <AccordionTrigger
+                      icon={<Maximize2 size={14} />}
+                      meta={
+                        windowLayout === "fullscreen"
+                          ? "Full HD"
+                          : windowLayout === "wide"
+                            ? "1600×940"
+                            : windowLayout === "compact_win"
+                              ? "880×880"
+                              : "620×900"
+                      }
+                    >
+                      Окно Windows 11, стекло и виджеты
+                    </AccordionTrigger>
+                    <AccordionPanel>
+                      <div className="setting-row">
+                        <div className="setting-label-col">
+                          <span className="setting-name">
+                            Размер окна (620×900 / 1920×1080)
+                          </span>
+                          <span className="setting-description">
+                            Портретная карточка по умолчанию или широкий / Full HD режим
+                          </span>
+                        </div>
+                        <div className="backdrop-segmented">
+                          {(
+                            [
+                              { id: "portrait", label: "620×900" },
+                              { id: "compact_win", label: "880×880" },
+                              { id: "wide", label: "1600×940" },
+                              { id: "fullscreen", label: "Full HD" },
+                            ] as const
+                          ).map((preset) => (
+                            <button
+                              key={preset.id}
+                              type="button"
+                              className={`backdrop-chip ${windowLayout === preset.id ? "active" : ""}`}
+                              onClick={() => void handleSelectWindowLayout(preset.id)}
+                            >
+                              {preset.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="info-divider" style={{ margin: "12px 0" }} />
+
+                      <div className="setting-row">
+                        <div className="setting-label-col">
+                          <span className="setting-name">Эффект прозрачности окна</span>
+                          <span className="setting-description">
+                            Чистый OLED Black или нативное стекло DWM без системных рамок
+                          </span>
+                        </div>
+                        <div className="backdrop-segmented">
+                          {(["oled", "mica", "acrylic", "tabbed"] as BackdropMode[]).map(
+                            (mode) => (
+                              <button
+                                key={mode}
+                                type="button"
+                                className={`backdrop-chip ${backdropMode === mode ? "active" : ""}`}
+                                onClick={() => handleSelectBackdrop(mode)}
+                              >
+                                {mode === "oled"
+                                  ? "OLED Black"
+                                  : mode === "mica"
+                                    ? "Mica"
+                                    : mode === "acrylic"
+                                      ? "Acrylic"
+                                      : "Tabbed"}
+                              </button>
+                            )
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="info-divider" style={{ margin: "12px 0" }} />
+
+                      <div className="setting-row">
+                        <div className="setting-label-col">
+                          <span className="setting-name">Плавающий Dynamic Island</span>
+                          <span className="setting-description">
+                            Компактный виджет поверх всех окон рабочего стола
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          className="mac-btn-accent"
+                          onClick={toggleIslandMode}
+                        >
+                          Перейти в Островок
                         </button>
-                      ))}
+                      </div>
+
+                      <div className="info-divider" style={{ margin: "12px 0" }} />
+
+                      <div className="setting-row">
+                        <div className="setting-label-col">
+                          <span className="setting-name">Apple Share Card & Отчёты</span>
+                          <span className="setting-description">
+                            Экспорт PNG-карточки для Telegram, CSV и Markdown
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          className="mac-action-btn"
+                          onClick={() => {
+                            appleAudio.playTap();
+                            setShareModalOpen(true);
+                          }}
+                        >
+                          <Share2 size={13} />
+                          <span>Открыть экспорт</span>
+                        </button>
+                      </div>
+                    </AccordionPanel>
+                  </AccordionItem>
+
+                  <AccordionItem value="security">
+                    <AccordionTrigger
+                      icon={<ShieldCheck size={14} />}
+                      meta={keyStorage.method}
+                    >
+                      Безопасность (DPAPI), обновления и автор
+                    </AccordionTrigger>
+                    <AccordionPanel>
+                      <div className="setting-row">
+                        <div className="setting-label-col">
+                          <span className="setting-name">Защита сохранённого ключа</span>
+                          <span className="setting-description">
+                            Привязка шифрования к учётной записи Windows в{" "}
+                            <code>%APPDATA%\TrueSOTA_Monitor</code>
+                          </span>
+                        </div>
+                        <span className="dpapi-status-badge">
+                          <ShieldCheck size={13} />
+                          <span>{keyStorage.method}</span>
+                        </span>
+                      </div>
+
+                      <div className="info-divider" style={{ margin: "12px 0" }} />
+
+                      <div className="setting-row">
+                        <div className="setting-label-col">
+                          <span className="setting-name">
+                            Обновления с GitHub (
+                            <code>v{updateInfo?.current_version || "1.2.0"}</code>)
+                          </span>
+                          <span className="setting-description">
+                            {updateError
+                              ? updateError
+                              : updateInfo
+                                ? updateInfo.has_update
+                                  ? `Доступна новая версия ${updateInfo.latest_version}`
+                                  : `У вас актуальная версия (${updateInfo.latest_version})`
+                                : "Проверка релизов afk3drp-dev/truesota-monitor"}
+                          </span>
+                        </div>
+                        <div
+                          style={{
+                            display: "flex",
+                            gap: "8px",
+                            flexWrap: "wrap",
+                            justifyContent: "flex-end",
+                          }}
+                        >
+                          <button
+                            type="button"
+                            className={`mac-action-btn ${autoCheckUpdates ? "copied" : ""}`}
+                            onClick={handleToggleAutoUpdates}
+                          >
+                            <span>Авто: {autoCheckUpdates ? "Вкл" : "Выкл"}</span>
+                          </button>
+                          <button
+                            type="button"
+                            className="mac-action-btn"
+                            disabled={checkingUpdate}
+                            onClick={() => void handleCheckUpdates(false)}
+                          >
+                            <AnimatedRefreshCw size={13} spinning={checkingUpdate} />
+                            <span>
+                              {checkingUpdate ? "Проверка..." : "Проверить"}
+                            </span>
+                          </button>
+                          {updateInfo?.has_update && (
+                            <button
+                              type="button"
+                              className="mac-btn-accent"
+                              onClick={handleOpenUpdateRelease}
+                            >
+                              <AnimatedDownload size={13} />
+                              <span>Скачать {updateInfo.latest_version}</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="info-divider" style={{ margin: "12px 0" }} />
+
+                      <TelegramCredit variant="card" />
+                    </AccordionPanel>
+                  </AccordionItem>
+                </Accordion>
+              </div>
+            </div>
+
+            <div className="settings-group settings-group-full">
+              <Accordion multiple={false}>
+                <AccordionItem value="json">
+                  <AccordionTrigger
+                    icon={<Database size={14} />}
+                    meta="Live Payload"
+                  >
+                    Ответ сервера (JSON Inspector)
+                  </AccordionTrigger>
+                  <AccordionPanel>
+                    <div className="raw-json-card">
+                      <pre className="raw-json-code">
+                        {JSON.stringify(data, null, 2)}
+                      </pre>
                     </div>
-                  </div>
-                  <div className="comet-dial-wrap">
-                    <CometDial
-                      value={Math.round(autoRefreshInterval / 1000)}
-                      min={0}
-                      max={300}
-                      step={15}
-                      unit="с"
-                      size={112}
-                      thickness={9}
-                      accent="#0a84ff"
-                      ink="#f5f5f7"
-                      onChange={(sec) => setAutoRefreshInterval(sec * 1000)}
-                      onChangeEnd={() => appleAudio.playTap()}
-                    />
-                  </div>
-                </div>
-
-                <div className="info-divider" style={{ margin: "12px 0" }} />
-
-                <div className="setting-row">
-                  <div className="setting-label-col">
-                    <span className="setting-name">Звуковые эффекты Apple</span>
-                    <span className="setting-description">Мягкие щелчки и звон успешного обновления</span>
-                  </div>
-                  <button
-                    className={`mac-action-btn ${soundEnabled ? "copied" : ""}`}
-                    onClick={toggleSound}
-                  >
-                    {soundEnabled ? "Включены (🔔)" : "Выключены (🔕)"}
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <div className="settings-group">
-              <span className="settings-group-title">ОКНО WINDOWS 11, СТЕКЛО И ВИДЖЕТЫ</span>
-              <div className="bento-card inset-card">
-                <div className="setting-row">
-                  <div className="setting-label-col">
-                    <span className="setting-name">Эффект прозрачности окна</span>
-                    <span className="setting-description">Нативное стекло DWM без системных рамок Windows</span>
-                  </div>
-                  <div className="backdrop-segmented">
-                    {(["mica", "acrylic", "tabbed", "oled"] as BackdropMode[]).map((mode) => (
-                      <button
-                        key={mode}
-                        type="button"
-                        className={`backdrop-chip ${backdropMode === mode ? "active" : ""}`}
-                        onClick={() => handleSelectBackdrop(mode)}
-                      >
-                        {mode === "mica"
-                          ? "Mica"
-                          : mode === "acrylic"
-                            ? "Acrylic"
-                            : mode === "tabbed"
-                              ? "Tabbed"
-                              : "OLED Black"}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="info-divider" style={{ margin: "12px 0" }} />
-
-                <div className="setting-row">
-                  <div className="setting-label-col">
-                    <span className="setting-name">Плавающий Dynamic Island</span>
-                    <span className="setting-description">Компактный виджет поверх всех окон рабочего стола</span>
-                  </div>
-                  <button
-                    type="button"
-                    className="mac-btn-accent"
-                    onClick={toggleIslandMode}
-                  >
-                    Перейти в Островок 🏝️
-                  </button>
-                </div>
-
-                <div className="info-divider" style={{ margin: "12px 0" }} />
-
-                <div className="setting-row">
-                  <div className="setting-label-col">
-                    <span className="setting-name">Apple Share Card & Отчёты</span>
-                    <span className="setting-description">Экспорт PNG-карточки для Telegram, CSV и Markdown</span>
-                  </div>
-                  <button
-                    type="button"
-                    className="mac-action-btn"
-                    onClick={() => {
-                      appleAudio.playTap();
-                      setShareModalOpen(true);
-                    }}
-                  >
-                    <Share2 size={13} />
-                    <span>Открыть экспорт</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <div className="settings-group">
-              <span className="settings-group-title">СИСТЕМНЫЙ ТРЕЙ, АВТОЗАПУСК И УВЕДОМЛЕНИЯ</span>
-              <div className="bento-card inset-card">
-                <div className="setting-row">
-                  <div className="setting-label-col">
-                    <span className="setting-name">Запускать вместе с Windows</span>
-                    <span className="setting-description">Автоматический тихий старт в системном трее при входе в систему</span>
-                  </div>
-                  <button
-                    type="button"
-                    className={`mac-action-btn ${nativePrefs.autostart ? "copied" : ""}`}
-                    onClick={handleToggleAutostart}
-                  >
-                    <Power size={13} />
-                    <span>{nativePrefs.autostart ? "Включён" : "Выключен"}</span>
-                  </button>
-                </div>
-
-                <div className="info-divider" style={{ margin: "12px 0" }} />
-
-                <div className="setting-row">
-                  <div className="setting-label-col">
-                    <span className="setting-name">Сворачивать в трей при закрытии (×)</span>
-                    <span className="setting-description">Мониторинг и баланс остаются в трее около часов Windows</span>
-                  </div>
-                  <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", justifyContent: "flex-end" }}>
-                    <button
-                      type="button"
-                      className={`mac-action-btn ${nativePrefs.close_to_tray ? "copied" : ""}`}
-                      onClick={handleToggleCloseToTray}
-                    >
-                      <span>{nativePrefs.close_to_tray ? "Включено" : "Выключено"}</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="mac-action-btn"
-                      onClick={() => void invoke("window_hide_to_tray")}
-                      title="Свернуть окно в трей прямо сейчас"
-                    >
-                      <span>В трей</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="mac-action-btn signout-btn"
-                      onClick={() => void invoke("window_quit")}
-                      title="Полностью закрыть программу"
-                    >
-                      <Power size={13} />
-                      <span>Выйти</span>
-                    </button>
-                  </div>
-                </div>
-
-                <div className="info-divider" style={{ margin: "12px 0" }} />
-
-                <div className="setting-row">
-                  <div className="setting-label-col">
-                    <span className="setting-name">Уведомление при низком остатке квоты</span>
-                    <span className="setting-description">Windows-алерт, если остаток упадёт ниже выбранного порога</span>
-                  </div>
-                  <div className="backdrop-segmented">
-                    {[
-                      { pct: 0, label: "Выкл" },
-                      { pct: 25, label: "< 25%" },
-                      { pct: 15, label: "< 15%" },
-                      { pct: 10, label: "< 10%" },
-                      { pct: 5, label: "< 5%" },
-                    ].map((opt) => (
-                      <button
-                        key={opt.pct}
-                        type="button"
-                        className={`backdrop-chip ${alertThresholdPct === opt.pct ? "active" : ""}`}
-                        onClick={() => handleSelectAlertThreshold(opt.pct)}
-                      >
-                        {opt.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="info-divider" style={{ margin: "12px 0" }} />
-
-                <div className="setting-row">
-                  <div className="setting-label-col">
-                    <span className="setting-name">Алерт при сбое или восстановлении API</span>
-                    <span className="setting-description">Уведомления Windows при потере связи со шлюзом TrueSOTA</span>
-                  </div>
-                  <div style={{ display: "flex", gap: "8px" }}>
-                    <button
-                      type="button"
-                      className={`mac-action-btn ${gatewayAlertEnabled ? "copied" : ""}`}
-                      onClick={handleToggleGatewayAlert}
-                    >
-                      {gatewayAlertEnabled ? <Bell size={13} /> : <BellOff size={13} />}
-                      <span>{gatewayAlertEnabled ? "Включены" : "Выключены"}</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="mac-action-btn"
-                      onClick={handleTestNotification}
-                      title="Отправить тестовое уведомление Windows"
-                    >
-                      <span>Тест</span>
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="settings-group">
-              <span className="settings-group-title">БЕЗОПАСНОСТЬ (DPAPI) И ОБНОВЛЕНИЯ</span>
-              <div className="bento-card inset-card">
-                <div className="setting-row">
-                  <div className="setting-label-col">
-                    <span className="setting-name">Защита сохранённого ключа</span>
-                    <span className="setting-description">
-                      Привязка шифрования к учётной записи Windows в <code>%APPDATA%\TrueSOTA_Monitor</code>
-                    </span>
-                  </div>
-                  <span className="dpapi-status-badge">
-                    <ShieldCheck size={13} />
-                    <span>{keyStorage.method}</span>
-                  </span>
-                </div>
-
-                <div className="info-divider" style={{ margin: "12px 0" }} />
-
-                <div className="setting-row">
-                  <div className="setting-label-col">
-                    <span className="setting-name">
-                      Обновления с GitHub (<code>v{updateInfo?.current_version || "1.1.0"}</code>)
-                    </span>
-                    <span className="setting-description">
-                      {updateError
-                        ? updateError
-                        : updateInfo
-                          ? updateInfo.has_update
-                            ? `Доступна новая версия ${updateInfo.latest_version}`
-                            : `У вас актуальная версия (${updateInfo.latest_version})`
-                          : "Проверка релизов afk3drp-dev/truesota-monitor"}
-                    </span>
-                  </div>
-                  <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", justifyContent: "flex-end" }}>
-                    <button
-                      type="button"
-                      className={`mac-action-btn ${autoCheckUpdates ? "copied" : ""}`}
-                      onClick={handleToggleAutoUpdates}
-                    >
-                      <span>Авто: {autoCheckUpdates ? "Вкл" : "Выкл"}</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="mac-action-btn"
-                      disabled={checkingUpdate}
-                      onClick={() => void handleCheckUpdates(false)}
-                    >
-                      <RefreshCw size={13} className={checkingUpdate ? "spin-icon" : ""} />
-                      <span>{checkingUpdate ? "Проверка..." : "Проверить"}</span>
-                    </button>
-                    {updateInfo?.has_update && (
-                      <button
-                        type="button"
-                        className="mac-btn-accent"
-                        onClick={handleOpenUpdateRelease}
-                      >
-                        <Download size={13} />
-                        <span>Скачать {updateInfo.latest_version}</span>
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="settings-group">
-              <span className="settings-group-title">АВТОР ПРОЕКТА</span>
-              <div className="bento-card inset-card">
-                <TelegramCredit variant="card" />
-              </div>
-            </div>
-
-            <div className="settings-group">
-              <span className="settings-group-title">ОТВЕТ СЕРВЕРА (JSON INSPECTOR)</span>
-              <div className="bento-card raw-json-card">
-                <pre className="raw-json-code">{JSON.stringify(data, null, 2)}</pre>
-              </div>
+                  </AccordionPanel>
+                </AccordionItem>
+              </Accordion>
             </div>
           </div>
         )}
@@ -2127,6 +2363,8 @@ export default function App() {
         soundEnabled={soundEnabled}
         backdropMode={backdropMode}
         onSelectBackdrop={handleSelectBackdrop}
+        windowLayout={windowLayout}
+        onSelectWindowLayout={(preset) => void handleSelectWindowLayout(preset)}
         onSignOut={handleSignOut}
         onCheckUpdates={() => {
           setActiveTab("settings");

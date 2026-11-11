@@ -131,19 +131,19 @@ export const WelcomeAuth: React.FC<WelcomeAuthProps> = ({
       <div className="welcome-grid-bg" aria-hidden="true">
         <CursorGrid
           cellSize={40}
-          color="#0a84ff"
-          gridColor="#1c273b"
+          color="#ffffff"
+          gridColor="#1c1c20"
           radius={140}
           falloff="smooth"
           highlight="area"
           gridStyle="crosses"
-          gridOpacity={0.28}
-          maxOpacity={0.44}
-          fillOpacity={0.14}
-          spotlight={0.5}
-          ambient={0.12}
+          gridOpacity={0.22}
+          maxOpacity={0.34}
+          fillOpacity={0.1}
+          spotlight={0.45}
+          ambient={0.08}
           clickPulse={true}
-          edgeFade={0.45}
+          edgeFade={0.48}
           intro={true}
         />
       </div>
@@ -180,7 +180,7 @@ export const WelcomeAuth: React.FC<WelcomeAuthProps> = ({
               sequential={true}
               revealDirection="start"
               animateOn="view"
-              scrambleColor="#64d2ff"
+              scrambleColor="#ffffff"
               className="welcome-decrypted-final"
               encryptedClassName="welcome-decrypted-cipher"
             />
@@ -203,7 +203,7 @@ export const WelcomeAuth: React.FC<WelcomeAuthProps> = ({
             <form className="welcome-auth-form" onSubmit={handleSignIn}>
               <div className="welcome-form-top">
                 <div className="welcome-form-badge">
-                  <KeyRound size={15} style={{ color: "var(--apple-blue)" }} />
+                  <KeyRound size={15} style={{ color: "#ffffff" }} />
                   <span>Вход в аккаунт по ключу</span>
                 </div>
                 <span className="welcome-form-note">Authorization: Bearer</span>
@@ -271,15 +271,15 @@ export const WelcomeAuth: React.FC<WelcomeAuthProps> = ({
                   type="submit"
                   size="md"
                   radius={12}
-                  tint="#0a84ff"
-                  tintOpacity={0.22}
+                  tint="#ffffff"
+                  tintOpacity={0.18}
                   blur={8}
                   textColor="#ffffff"
-                  lineColor="#7dd3fc"
-                  baseColor="#1e3a8a"
-                  intensity={1.15}
-                  idleIntensity={0.45}
-                  glow={0.9}
+                  lineColor="#ffffff"
+                  baseColor="#141417"
+                  intensity={1.25}
+                  idleIntensity={0.62}
+                  glow={0.95}
                   disabled={loading || !keyInput.trim()}
                   className="welcome-specular-cta"
                 >
@@ -309,7 +309,7 @@ export const WelcomeAuth: React.FC<WelcomeAuthProps> = ({
             gap={10}
             radius={16}
             theme="dark"
-            glowColor="#0a84ff"
+            glowColor="#ffffff"
             enableBorderGlow={true}
             enableSpotlight={true}
             spotlightRadius={260}

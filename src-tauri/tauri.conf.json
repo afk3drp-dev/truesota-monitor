@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "TrueSOTA Monitor",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "identifier": "com.truesota.monitor",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -13,11 +13,12 @@
     "windows": [
       {
         "title": "TrueSOTA Usage Monitor",
-        "width": 880,
-        "height": 880,
-        "minWidth": 340,
-        "minHeight": 80,
+        "width": 620,
+        "height": 900,
+        "minWidth": 360,
+        "minHeight": 420,
         "center": true,
+        "maximized": false,
         "decorations": false,
         "transparent": true,
         "shadow": true

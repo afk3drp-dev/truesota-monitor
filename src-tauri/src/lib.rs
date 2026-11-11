@@ -535,14 +535,77 @@ fn window_minimize(window: tauri::WebviewWindow) -> Result<(), String> {
     window.minimize().map_err(|e| e.to_string())
 }
 
+fn apply_clamped_logical_size(window: &tauri::WebviewWindow, target_w: f64, target_h: f64) -> Result<(), String> {
+    let mut final_w = target_w;
+    let mut final_h = target_h;
+
+    if let Ok(Some(monitor)) = window.current_monitor() {
+        let scale = monitor.scale_factor().max(1.0);
+        let work = monitor.work_area();
+        let max_w = (work.size.width as f64 / scale - 16.0).max(360.0);
+        let max_h = (work.size.height as f64 / scale - 16.0).max(320.0);
+        final_w = final_w.min(max_w);
+        final_h = final_h.min(max_h);
+    }
+
+    if window.is_maximized().unwrap_or(false) {
+        let _ = window.unmaximize();
+    }
+    window
+        .set_size(tauri::Size::Logical(tauri::LogicalSize {
+            width: final_w,
+            height: final_h,
+        }))
+        .map_err(|e| e.to_string())?;
+    let _ = window.center();
+    Ok(())
+}
+
+fn apply_window_layout_preset(window: &tauri::WebviewWindow, layout: &str) -> Result<bool, String> {
+    window.set_always_on_top(false).map_err(|e| e.to_string())?;
+    let _ = window.set_shadow(true);
+    match layout {
+        "fullscreen" => {
+            // Maximize cleanly into monitor workarea (e.g. 1920x1080 taskbar-aware)
+            window.maximize().map_err(|e| e.to_string())?;
+            Ok(window.is_maximized().unwrap_or(true))
+        }
+        "wide" => {
+            apply_clamped_logical_size(window, 1600.0, 940.0)?;
+            Ok(false)
+        }
+        "compact_win" => {
+            apply_clamped_logical_size(window, 880.0, 880.0)?;
+            Ok(false)
+        }
+        _ => {
+            // "portrait": sleek 620x900 vertical desktop widget window
+            apply_clamped_logical_size(window, 620.0, 900.0)?;
+            Ok(false)
+        }
+    }
+}
+
 #[tauri::command]
-fn window_toggle_maximize(window: tauri::WebviewWindow) -> Result<(), String> {
+fn get_window_is_maximized(window: tauri::WebviewWindow) -> bool {
+    window.is_maximized().unwrap_or(false)
+}
+
+#[tauri::command]
+fn window_toggle_maximize(window: tauri::WebviewWindow) -> Result<bool, String> {
     let is_max = window.is_maximized().unwrap_or(false);
     if is_max {
-        window.unmaximize().map_err(|e| e.to_string())
+        window.unmaximize().map_err(|e| e.to_string())?;
+        Ok(false)
     } else {
-        window.maximize().map_err(|e| e.to_string())
+        window.maximize().map_err(|e| e.to_string())?;
+        Ok(true)
     }
+}
+
+#[tauri::command]
+fn set_window_layout(window: tauri::WebviewWindow, layout: String) -> Result<bool, String> {
+    apply_window_layout_preset(&window, &layout)
 }
 
 #[tauri::command]
@@ -550,13 +613,17 @@ fn set_window_mode(
     window: tauri::WebviewWindow,
     mode: String,
     vibrancy: Option<String>,
-) -> Result<(), String> {
+    layout: Option<String>,
+) -> Result<bool, String> {
     if mode == "compact" {
         if let Some(wv) = window.app_handle().get_webview("monitor_embed") {
             let _ = wv.hide();
         }
         apply_backdrop_effect(&window, "none");
         let _ = window.set_shadow(false);
+        if window.is_maximized().unwrap_or(false) {
+            let _ = window.unmaximize();
+        }
         window
             .set_size(tauri::Size::Logical(tauri::LogicalSize {
                 width: 390.0,
@@ -564,18 +631,13 @@ fn set_window_mode(
             }))
             .map_err(|e| e.to_string())?;
         window.set_always_on_top(true).map_err(|e| e.to_string())?;
+        Ok(false)
     } else {
-        window.set_always_on_top(false).map_err(|e| e.to_string())?;
-        let _ = window.set_shadow(true);
-        window
-            .set_size(tauri::Size::Logical(tauri::LogicalSize {
-                width: 880.0,
-                height: 880.0,
-            }))
-            .map_err(|e| e.to_string())?;
-        apply_backdrop_effect(&window, vibrancy.as_deref().unwrap_or("mica"));
+        let target_layout = layout.as_deref().unwrap_or("portrait");
+        let is_max = apply_window_layout_preset(&window, target_layout)?;
+        apply_backdrop_effect(&window, vibrancy.as_deref().unwrap_or("oled"));
+        Ok(is_max)
     }
-    Ok(())
 }
 
 #[tauri::command]
@@ -786,6 +848,8 @@ pub fn run() {
             window_quit,
             window_minimize,
             window_toggle_maximize,
+            get_window_is_maximized,
+            set_window_layout,
             set_window_mode,
             set_compact_expanded,
             save_export_file
