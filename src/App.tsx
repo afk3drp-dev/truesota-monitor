@@ -1,5 +1,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   RefreshCw,
   Copy,
@@ -30,13 +32,19 @@ import {
   Command,
   LogOut,
   Activity,
+  Bell,
+  BellOff,
+  Download,
+  ShieldCheck,
+  Power,
+  ArrowUpCircle,
 } from "lucide-react";
 import { AnimatedNumber } from "./components/AnimatedNumber";
 import { ModelDonutChart } from "./components/ModelDonutChart";
 import { ModelLogo, detectProvider } from "./components/ModelLogo";
 import { ActivityHeatmap } from "./components/ActivityHeatmap";
 import { PricingCatalog } from "./components/PricingCatalog";
-import { MonitorView } from "./components/MonitorView";
+import { MonitorView, type GatewayPingResult } from "./components/MonitorView";
 import { ShareCardModal } from "./components/ShareCardModal";
 import {
   CommandPalette,
@@ -117,6 +125,27 @@ interface TrueSotaResponse {
   daily_usage?: DailyUsageItem[];
 }
 
+interface KeyStorageStatus {
+  has_key: boolean;
+  protected: boolean;
+  method: string;
+}
+
+interface NativeSettingsState {
+  close_to_tray: boolean;
+  autostart: boolean;
+}
+
+interface UpdateCheckResult {
+  current_version: string;
+  latest_version: string;
+  has_update: boolean;
+  release_url: string;
+  release_name: string;
+  published_at: string;
+  notes_preview: string;
+}
+
 function formatNumber(num: number): string {
   if (num >= 1_000_000_000) return `${(num / 1_000_000_000).toFixed(2)}B`;
   if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(1)}M`;
@@ -158,7 +187,39 @@ export default function App() {
   const [commandPaletteOpen, setCommandPaletteOpen] = useState<boolean>(false);
   const [shareModalOpen, setShareModalOpen] = useState<boolean>(false);
 
-  // Initialize API Key & Backdrop Material
+  // Security (DPAPI), Tray, Autostart, Alerts & Auto-Update States
+  const [keyStorage, setKeyStorage] = useState<KeyStorageStatus>({
+    has_key: false,
+    protected: true,
+    method: "Windows DPAPI",
+  });
+  const [nativePrefs, setNativePrefs] = useState<NativeSettingsState>({
+    close_to_tray: true,
+    autostart: false,
+  });
+  const [alertThresholdPct, setAlertThresholdPct] = useState<number>(() => {
+    const saved = Number(localStorage.getItem("truesota_alert_threshold_pct"));
+    return Number.isFinite(saved) && saved >= 0 && saved <= 50 ? saved : 15;
+  });
+  const [gatewayAlertEnabled, setGatewayAlertEnabled] = useState<boolean>(() => {
+    return localStorage.getItem("truesota_alert_gateway") !== "false";
+  });
+  const [autoCheckUpdates, setAutoCheckUpdates] = useState<boolean>(() => {
+    return localStorage.getItem("truesota_auto_check_updates") !== "false";
+  });
+  const [updateInfo, setUpdateInfo] = useState<UpdateCheckResult | null>(null);
+  const [checkingUpdate, setCheckingUpdate] = useState<boolean>(false);
+  const [updateError, setUpdateError] = useState<string | null>(null);
+  const [updateDismissed, setUpdateDismissed] = useState<boolean>(false);
+  const [monitorSyncTick, setMonitorSyncTick] = useState<number>(0);
+
+  const lowAlertFiredRef = useRef<boolean>(false);
+  const lastGatewayOkRef = useRef<boolean | null>(null);
+  const lastGatewayAlertAtRef = useRef<number>(0);
+  const loadDataRef = useRef<(() => void) | null>(null);
+  const toggleIslandRef = useRef<(() => void) | null>(null);
+
+  // Initialize API Key, DPAPI Status, Native Preferences & Backdrop Material
   useEffect(() => {
     async function initApp() {
       try {
@@ -169,6 +230,18 @@ export default function App() {
         console.error("Failed to load API key", e);
       } finally {
         setKeyLoaded(true);
+      }
+      try {
+        const status = await invoke<KeyStorageStatus>("get_key_storage_status");
+        setKeyStorage(status);
+      } catch {
+        // fallback handled cleanly
+      }
+      try {
+        const prefs = await invoke<NativeSettingsState>("get_app_preferences");
+        setNativePrefs(prefs);
+      } catch {
+        // fallback defaults
       }
       try {
         await invoke("set_window_vibrancy", {
@@ -196,6 +269,71 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [apiKey]);
 
+  const notifyWindows = useCallback(async (title: string, body: string) => {
+    try {
+      await invoke("send_windows_notification", { title, body });
+    } catch (e) {
+      console.warn("Windows toast notification failed", e);
+    }
+  }, []);
+
+  const handleGatewayStatus = useCallback(
+    (res: GatewayPingResult) => {
+      const prev = lastGatewayOkRef.current;
+      lastGatewayOkRef.current = res.ok;
+      if (!gatewayAlertEnabled) return;
+
+      const now = Date.now();
+      if (!res.ok) {
+        const shouldAlert =
+          prev === true || (prev === null && now - lastGatewayAlertAtRef.current > 600_000);
+        if (shouldAlert && now - lastGatewayAlertAtRef.current > 600_000) {
+          lastGatewayAlertAtRef.current = now;
+          void notifyWindows(
+            "API-шлюз TrueSOTA недоступен",
+            res.error || `Код ответа ${res.status_code || "таймаут"}. Проверьте вкладку «Монитор».`
+          );
+        }
+      } else if (prev === false) {
+        lastGatewayAlertAtRef.current = 0;
+        void notifyWindows(
+          "API-шлюз TrueSOTA восстановлен",
+          `Соединение стабильно (${res.latency_ms} мс).`
+        );
+      }
+    },
+    [gatewayAlertEnabled, notifyWindows]
+  );
+
+  const applyUsageAlertsAndTray = useCallback(
+    (res: TrueSotaResponse) => {
+      const lim = res.quota?.limit ?? 0;
+      const rem = res.quota?.remaining ?? res.remaining ?? res.balance ?? 0;
+      const pct = lim > 0 ? Math.min(100, Math.max(0, (rem / lim) * 100)) : 0;
+
+      const tip =
+        lim > 0
+          ? `TrueSOTA Monitor • $${rem.toFixed(2)} (${pct.toFixed(0)}%)`
+          : `TrueSOTA Monitor • $${rem.toFixed(2)}`;
+      void invoke("update_tray_status", { summary: tip }).catch(() => {});
+
+      if (alertThresholdPct > 0 && lim > 0) {
+        if (pct <= alertThresholdPct) {
+          if (!lowAlertFiredRef.current) {
+            lowAlertFiredRef.current = true;
+            void notifyWindows(
+              "Низкий остаток квоты TrueSOTA",
+              `Осталось $${rem.toFixed(2)} (${pct.toFixed(1)}%) — ниже порога ${alertThresholdPct}%.`
+            );
+          }
+        } else if (pct > alertThresholdPct + 3) {
+          lowAlertFiredRef.current = false;
+        }
+      }
+    },
+    [alertThresholdPct, notifyWindows]
+  );
+
   const loadData = useCallback(async (currentKey?: string) => {
     const active = (currentKey || apiKey || "").trim();
     if (!active) return;
@@ -206,6 +344,7 @@ export default function App() {
         apiKey: active,
       });
       setData(res);
+      applyUsageAlertsAndTray(res);
       const now = new Date();
       setLastUpdated(now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
       appleAudio.playSuccessChime();
@@ -214,7 +353,7 @@ export default function App() {
     } finally {
       setLoading(false);
     }
-  }, [apiKey]);
+  }, [apiKey, applyUsageAlertsAndTray]);
 
   useEffect(() => {
     if (!apiKey) return;
@@ -229,14 +368,58 @@ export default function App() {
     if (!apiKey || autoRefreshInterval <= 0) return;
     const timer = setInterval(() => {
       loadData();
+      if (gatewayAlertEnabled && activeTab !== "monitor") {
+        void invoke<GatewayPingResult>("ping_gateway", { apiKey })
+          .then(handleGatewayStatus)
+          .catch(() => {});
+      }
     }, autoRefreshInterval);
     return () => clearInterval(timer);
-  }, [apiKey, autoRefreshInterval, loadData]);
+  }, [apiKey, autoRefreshInterval, loadData, gatewayAlertEnabled, activeTab, handleGatewayStatus]);
 
-  const handleAuthenticated = (newKey: string, initialData: unknown | null) => {
+  const handleCheckUpdates = useCallback(async (silent = false) => {
+    setCheckingUpdate(true);
+    if (!silent) setUpdateError(null);
+    try {
+      const res = await invoke<UpdateCheckResult>("check_app_update");
+      setUpdateInfo(res);
+      setUpdateError(null);
+      if (res.has_update) {
+        setUpdateDismissed(false);
+      }
+    } catch (e) {
+      if (!silent) {
+        setUpdateError(String(e));
+      }
+    } finally {
+      setCheckingUpdate(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!autoCheckUpdates) return;
+    const timer = window.setTimeout(() => {
+      void handleCheckUpdates(true);
+    }, 3500);
+    return () => window.clearTimeout(timer);
+  }, [autoCheckUpdates, handleCheckUpdates]);
+
+  const handleOpenUpdateRelease = async () => {
+    appleAudio.playTap();
+    const url = updateInfo?.release_url || "https://github.com/afk3drp-dev/truesota-monitor/releases";
+    try {
+      await openUrl(url);
+    } catch {
+      window.open(url, "_blank", "noopener,noreferrer");
+    }
+  };
+
+  const handleAuthenticated = async (newKey: string, initialData: unknown | null) => {
     if (initialData) {
       skipNextLoadRef.current = true;
-      setData(initialData as TrueSotaResponse);
+      const typed = initialData as TrueSotaResponse;
+      setData(typed);
+      applyUsageAlertsAndTray(typed);
       const now = new Date();
       setLastUpdated(now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
     }
@@ -244,6 +427,12 @@ export default function App() {
     setActiveTab("overview");
     setKeyInput(newKey);
     setApiKey(newKey);
+    try {
+      const status = await invoke<KeyStorageStatus>("get_key_storage_status");
+      setKeyStorage(status);
+    } catch {
+      // ignore
+    }
   };
 
   const handleSignOut = async () => {
@@ -261,9 +450,12 @@ export default function App() {
     }
     try {
       await invoke("clear_api_key");
+      const status = await invoke<KeyStorageStatus>("get_key_storage_status");
+      setKeyStorage(status);
     } catch (e) {
       console.error("Failed to clear API key", e);
     }
+    void invoke("update_tray_status", { summary: "TrueSOTA Monitor • Ожидание входа" }).catch(() => {});
     setCommandPaletteOpen(false);
     setShareModalOpen(false);
     setActiveTab("overview");
@@ -313,6 +505,32 @@ export default function App() {
     }
   };
 
+  loadDataRef.current = () => {
+    void loadData();
+  };
+  toggleIslandRef.current = () => {
+    void toggleIslandMode();
+  };
+
+  useEffect(() => {
+    const unlistenPromises = [
+      listen("tray-refresh", () => {
+        loadDataRef.current?.();
+      }),
+      listen("tray-toggle-island", () => {
+        toggleIslandRef.current?.();
+      }),
+      listen("tray-restore", () => {
+        setMonitorSyncTick((n) => n + 1);
+      }),
+    ];
+    return () => {
+      for (const p of unlistenPromises) {
+        void p.then((unlisten) => unlisten());
+      }
+    };
+  }, []);
+
   const toggleIslandExpanded = async () => {
     appleAudio.playTap();
     const next = !isIslandExpanded;
@@ -336,12 +554,65 @@ export default function App() {
     }
     try {
       await invoke<string>("save_api_key", { key: keyInput.trim() });
+      const status = await invoke<KeyStorageStatus>("get_key_storage_status");
+      setKeyStorage(status);
       setApiKey(keyInput.trim());
       appleAudio.playSuccessChime();
       loadData(keyInput.trim());
     } catch (e) {
       setError(String(e));
     }
+  };
+
+  const handleToggleAutostart = async () => {
+    appleAudio.playTap();
+    const next = !nativePrefs.autostart;
+    try {
+      const actual = await invoke<boolean>("set_autostart", { enabled: next });
+      setNativePrefs((p) => ({ ...p, autostart: actual }));
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const handleToggleCloseToTray = async () => {
+    appleAudio.playTap();
+    const next = !nativePrefs.close_to_tray;
+    try {
+      const actual = await invoke<boolean>("set_close_to_tray", { enabled: next });
+      setNativePrefs((p) => ({ ...p, close_to_tray: actual }));
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const handleSelectAlertThreshold = (pct: number) => {
+    appleAudio.playTap();
+    lowAlertFiredRef.current = false;
+    setAlertThresholdPct(pct);
+    localStorage.setItem("truesota_alert_threshold_pct", String(pct));
+  };
+
+  const handleToggleGatewayAlert = () => {
+    appleAudio.playTap();
+    const next = !gatewayAlertEnabled;
+    setGatewayAlertEnabled(next);
+    localStorage.setItem("truesota_alert_gateway", String(next));
+  };
+
+  const handleToggleAutoUpdates = () => {
+    appleAudio.playTap();
+    const next = !autoCheckUpdates;
+    setAutoCheckUpdates(next);
+    localStorage.setItem("truesota_auto_check_updates", String(next));
+  };
+
+  const handleTestNotification = async () => {
+    appleAudio.playTap();
+    await notifyWindows(
+      "TrueSOTA Usage Monitor",
+      "Системные уведомления Windows работают корректно."
+    );
   };
 
   const handleCopyReport = () => {
@@ -656,7 +927,7 @@ export default function App() {
           <button
             type="button"
             className="light close"
-            title="Закрыть окно"
+            title={nativePrefs.close_to_tray ? "Свернуть в системный трей" : "Закрыть программу"}
             onClick={() => invoke("window_close")}
           >
             <span>×</span>
@@ -694,6 +965,18 @@ export default function App() {
           className="titlebar-actions"
           onMouseDown={(e) => e.stopPropagation()}
         >
+          {updateInfo?.has_update && (
+            <button
+              type="button"
+              className="update-title-pill"
+              onClick={handleOpenUpdateRelease}
+              title={`Доступно обновление ${updateInfo.latest_version}`}
+            >
+              <ArrowUpCircle size={13} />
+              <span>{updateInfo.latest_version}</span>
+            </button>
+          )}
+
           <button
             type="button"
             className="spotlight-trigger-btn"
@@ -827,6 +1110,31 @@ export default function App() {
 
       {/* Main Content Area */}
       <main className="mac-viewport">
+        {updateInfo?.has_update && !updateDismissed && (
+          <div className="toast-banner update">
+            <ArrowUpCircle size={15} />
+            <span style={{ flex: 1 }}>
+              Доступна новая версия <strong>{updateInfo.latest_version}</strong> (у вас{" "}
+              <code>v{updateInfo.current_version}</code>)
+            </span>
+            <button
+              type="button"
+              className="update-banner-btn"
+              onClick={handleOpenUpdateRelease}
+            >
+              <Download size={12} />
+              <span>Скачать</span>
+            </button>
+            <button
+              type="button"
+              className="update-dismiss-btn"
+              onClick={() => setUpdateDismissed(true)}
+            >
+              Скрыть
+            </button>
+          </div>
+        )}
+
         {error && (
           <div className="toast-banner error">
             <AlertCircle size={15} />
@@ -1338,7 +1646,8 @@ export default function App() {
               !shareModalOpen &&
               !isIslandMode
             }
-            onSyncTrigger={error ? 1 : 0}
+            onSyncTrigger={monitorSyncTick + (error ? 1 : 0)}
+            onPingResult={handleGatewayStatus}
           />
         )}
 
@@ -1359,7 +1668,12 @@ export default function App() {
                 <div className="setting-row">
                   <div className="setting-label-col">
                     <span className="setting-name">TrueSOTA API Key</span>
-                    <span className="setting-description">Авторизационный токен доступа к API (хранится только у вас)</span>
+                    <span className="setting-description">
+                      Токен доступа к API •{" "}
+                      <strong style={{ color: "var(--apple-green)" }}>
+                        {keyStorage.method}
+                      </strong>
+                    </span>
                   </div>
                   <div className="setting-input-wrap">
                     <div className="mac-input-box">
@@ -1537,6 +1851,180 @@ export default function App() {
             </div>
 
             <div className="settings-group">
+              <span className="settings-group-title">СИСТЕМНЫЙ ТРЕЙ, АВТОЗАПУСК И УВЕДОМЛЕНИЯ</span>
+              <div className="bento-card inset-card">
+                <div className="setting-row">
+                  <div className="setting-label-col">
+                    <span className="setting-name">Запускать вместе с Windows</span>
+                    <span className="setting-description">Автоматический тихий старт в системном трее при входе в систему</span>
+                  </div>
+                  <button
+                    type="button"
+                    className={`mac-action-btn ${nativePrefs.autostart ? "copied" : ""}`}
+                    onClick={handleToggleAutostart}
+                  >
+                    <Power size={13} />
+                    <span>{nativePrefs.autostart ? "Включён" : "Выключен"}</span>
+                  </button>
+                </div>
+
+                <div className="info-divider" style={{ margin: "12px 0" }} />
+
+                <div className="setting-row">
+                  <div className="setting-label-col">
+                    <span className="setting-name">Сворачивать в трей при закрытии (×)</span>
+                    <span className="setting-description">Мониторинг и баланс остаются в трее около часов Windows</span>
+                  </div>
+                  <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                    <button
+                      type="button"
+                      className={`mac-action-btn ${nativePrefs.close_to_tray ? "copied" : ""}`}
+                      onClick={handleToggleCloseToTray}
+                    >
+                      <span>{nativePrefs.close_to_tray ? "Включено" : "Выключено"}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="mac-action-btn"
+                      onClick={() => void invoke("window_hide_to_tray")}
+                      title="Свернуть окно в трей прямо сейчас"
+                    >
+                      <span>В трей</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="mac-action-btn signout-btn"
+                      onClick={() => void invoke("window_quit")}
+                      title="Полностью закрыть программу"
+                    >
+                      <Power size={13} />
+                      <span>Выйти</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="info-divider" style={{ margin: "12px 0" }} />
+
+                <div className="setting-row">
+                  <div className="setting-label-col">
+                    <span className="setting-name">Уведомление при низком остатке квоты</span>
+                    <span className="setting-description">Windows-алерт, если остаток упадёт ниже выбранного порога</span>
+                  </div>
+                  <div className="backdrop-segmented">
+                    {[
+                      { pct: 0, label: "Выкл" },
+                      { pct: 25, label: "< 25%" },
+                      { pct: 15, label: "< 15%" },
+                      { pct: 10, label: "< 10%" },
+                      { pct: 5, label: "< 5%" },
+                    ].map((opt) => (
+                      <button
+                        key={opt.pct}
+                        type="button"
+                        className={`backdrop-chip ${alertThresholdPct === opt.pct ? "active" : ""}`}
+                        onClick={() => handleSelectAlertThreshold(opt.pct)}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="info-divider" style={{ margin: "12px 0" }} />
+
+                <div className="setting-row">
+                  <div className="setting-label-col">
+                    <span className="setting-name">Алерт при сбое или восстановлении API</span>
+                    <span className="setting-description">Уведомления Windows при потере связи со шлюзом TrueSOTA</span>
+                  </div>
+                  <div style={{ display: "flex", gap: "8px" }}>
+                    <button
+                      type="button"
+                      className={`mac-action-btn ${gatewayAlertEnabled ? "copied" : ""}`}
+                      onClick={handleToggleGatewayAlert}
+                    >
+                      {gatewayAlertEnabled ? <Bell size={13} /> : <BellOff size={13} />}
+                      <span>{gatewayAlertEnabled ? "Включены" : "Выключены"}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="mac-action-btn"
+                      onClick={handleTestNotification}
+                      title="Отправить тестовое уведомление Windows"
+                    >
+                      <span>Тест</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="settings-group">
+              <span className="settings-group-title">БЕЗОПАСНОСТЬ (DPAPI) И ОБНОВЛЕНИЯ</span>
+              <div className="bento-card inset-card">
+                <div className="setting-row">
+                  <div className="setting-label-col">
+                    <span className="setting-name">Защита сохранённого ключа</span>
+                    <span className="setting-description">
+                      Привязка шифрования к учётной записи Windows в <code>%APPDATA%\TrueSOTA_Monitor</code>
+                    </span>
+                  </div>
+                  <span className="dpapi-status-badge">
+                    <ShieldCheck size={13} />
+                    <span>{keyStorage.method}</span>
+                  </span>
+                </div>
+
+                <div className="info-divider" style={{ margin: "12px 0" }} />
+
+                <div className="setting-row">
+                  <div className="setting-label-col">
+                    <span className="setting-name">
+                      Обновления с GitHub (<code>v{updateInfo?.current_version || "1.1.0"}</code>)
+                    </span>
+                    <span className="setting-description">
+                      {updateError
+                        ? updateError
+                        : updateInfo
+                          ? updateInfo.has_update
+                            ? `Доступна новая версия ${updateInfo.latest_version}`
+                            : `У вас актуальная версия (${updateInfo.latest_version})`
+                          : "Проверка релизов afk3drp-dev/truesota-monitor"}
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                    <button
+                      type="button"
+                      className={`mac-action-btn ${autoCheckUpdates ? "copied" : ""}`}
+                      onClick={handleToggleAutoUpdates}
+                    >
+                      <span>Авто: {autoCheckUpdates ? "Вкл" : "Выкл"}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="mac-action-btn"
+                      disabled={checkingUpdate}
+                      onClick={() => void handleCheckUpdates(false)}
+                    >
+                      <RefreshCw size={13} className={checkingUpdate ? "spin-icon" : ""} />
+                      <span>{checkingUpdate ? "Проверка..." : "Проверить"}</span>
+                    </button>
+                    {updateInfo?.has_update && (
+                      <button
+                        type="button"
+                        className="mac-btn-accent"
+                        onClick={handleOpenUpdateRelease}
+                      >
+                        <Download size={13} />
+                        <span>Скачать {updateInfo.latest_version}</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="settings-group">
               <span className="settings-group-title">АВТОР ПРОЕКТА</span>
               <div className="bento-card inset-card">
                 <TelegramCredit variant="card" />
@@ -1640,6 +2128,12 @@ export default function App() {
         backdropMode={backdropMode}
         onSelectBackdrop={handleSelectBackdrop}
         onSignOut={handleSignOut}
+        onCheckUpdates={() => {
+          setActiveTab("settings");
+          void handleCheckUpdates(false);
+        }}
+        onHideToTray={() => void invoke("window_hide_to_tray")}
+        onQuitApp={() => void invoke("window_quit")}
         modelStats={data?.model_stats || []}
       />
     </div>

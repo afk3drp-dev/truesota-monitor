@@ -15,7 +15,9 @@
       "identifier": "opener:allow-open-url",
       "allow": [
         { "url": "https://true-sota.com/**" },
-        { "url": "https://t.me/afk3drp" }
+        { "url": "https://t.me/afk3drp" },
+        { "url": "https://github.com/afk3drp-dev/truesota-monitor/releases" },
+        { "url": "https://github.com/afk3drp-dev/truesota-monitor/releases/**" }
       ]
     }
   ]

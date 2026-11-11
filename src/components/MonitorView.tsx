@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { appleAudio } from "../utils/audio";
 
-interface GatewayPingResult {
+export interface GatewayPingResult {
   ok: boolean;
   status_code: number;
   latency_ms: number;
@@ -26,12 +26,14 @@ interface MonitorViewProps {
   apiKey: string;
   isVisible: boolean;
   onSyncTrigger?: number;
+  onPingResult?: (res: GatewayPingResult) => void;
 }
 
 export const MonitorView: React.FC<MonitorViewProps> = ({
   apiKey,
   isVisible,
   onSyncTrigger = 0,
+  onPingResult,
 }) => {
   const slotRef = useRef<HTMLDivElement | null>(null);
   const wantVisibleRef = useRef<boolean>(false);
@@ -156,8 +158,9 @@ export const MonitorView: React.FC<MonitorViewProps> = ({
       });
       setPingResult(res);
       setPingHistory((prev) => [...prev.slice(-19), res.latency_ms]);
+      onPingResult?.(res);
     } catch (e: unknown) {
-      setPingResult({
+      const fallbackRes: GatewayPingResult = {
         ok: false,
         status_code: 0,
         latency_ms: 0,
@@ -165,11 +168,13 @@ export const MonitorView: React.FC<MonitorViewProps> = ({
         models_count: 0,
         authenticated: Boolean(apiKey.trim()),
         error: String(e),
-      });
+      };
+      setPingResult(fallbackRes);
+      onPingResult?.(fallbackRes);
     } finally {
       setPinging(false);
     }
-  }, [apiKey]);
+  }, [apiKey, onPingResult]);
 
   useEffect(() => {
     void runGatewayPing();

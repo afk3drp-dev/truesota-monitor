@@ -3672,3 +3672,98 @@ body {
   gap: 8px;
   margin-top: 4px;
 }
+
+/* ============================================================
+   v1.1.0 Update Pill, Banner & Windows DPAPI Badge
+   ============================================================ */
+.update-title-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(48, 209, 88, 0.38);
+  background: rgba(48, 209, 88, 0.14);
+  color: #5deb81;
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+
+.update-title-pill:hover {
+  background: rgba(48, 209, 88, 0.24);
+  transform: translateY(-1px);
+}
+
+.toast-banner.update {
+  background: rgba(48, 209, 88, 0.11);
+  border: 1px solid rgba(48, 209, 88, 0.28);
+  color: #d8ffe1;
+}
+
+.toast-banner.update code {
+  background: rgba(255, 255, 255, 0.08);
+  padding: 1px 5px;
+  border-radius: 5px;
+  font-size: 0.73rem;
+}
+
+.update-banner-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 11px;
+  border-radius: 7px;
+  border: 1px solid rgba(48, 209, 88, 0.45);
+  background: rgba(48, 209, 88, 0.22);
+  color: #ffffff;
+  font-size: 0.74rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.update-banner-btn:hover {
+  background: rgba(48, 209, 88, 0.34);
+}
+
+.update-dismiss-btn {
+  padding: 5px 9px;
+  border-radius: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--apple-text-secondary);
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.update-dismiss-btn:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.dpapi-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  border: 1px solid rgba(48, 209, 88, 0.35);
+  background: rgba(48, 209, 88, 0.12);
+  color: #5deb81;
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+
+.spin-icon {
+  animation: spinAnim 0.9s linear infinite;
+}
+
+@keyframes spinAnim {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}

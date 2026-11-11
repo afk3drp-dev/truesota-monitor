@@ -15,6 +15,9 @@ import {
   Volume2,
   CornerDownLeft,
   LogOut,
+  Download,
+  Power,
+  EyeOff,
 } from "lucide-react";
 import { ModelLogo } from "./ModelLogo";
 import type { CacheModelStatItem } from "./ActivityHeatmap";
@@ -54,6 +57,9 @@ interface CommandPaletteProps {
   backdropMode: BackdropMode;
   onSelectBackdrop: (mode: BackdropMode) => void;
   onSignOut?: () => void;
+  onCheckUpdates?: () => void;
+  onHideToTray?: () => void;
+  onQuitApp?: () => void;
   modelStats: CacheModelStatItem[];
 }
 
@@ -70,6 +76,9 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
   backdropMode,
   onSelectBackdrop,
   onSignOut,
+  onCheckUpdates,
+  onHideToTray,
+  onQuitApp,
   modelStats,
 }) => {
   const [query, setQuery] = useState("");
@@ -257,6 +266,54 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
           onClose();
         },
       },
+      ...(onCheckUpdates
+        ? [
+            {
+              id: "act-update-check",
+              section: "Система и обновления",
+              title: "Проверить обновления (GitHub)",
+              subtitle: "Найти новый релиз в afk3drp-dev/truesota-monitor",
+              icon: <Download size={15} style={{ color: "#30d158" }} />,
+              keywords: "обновления update github версия release скачать",
+              action: () => {
+                onClose();
+                onCheckUpdates();
+              },
+            },
+          ]
+        : []),
+      ...(onHideToTray
+        ? [
+            {
+              id: "act-tray",
+              section: "Система и обновления",
+              title: "Свернуть в системный трей",
+              subtitle: "Оставить мониторинг работать около часов Windows",
+              icon: <EyeOff size={15} />,
+              keywords: "трей tray свернуть фон hide minimize",
+              action: () => {
+                onClose();
+                onHideToTray();
+              },
+            },
+          ]
+        : []),
+      ...(onQuitApp
+        ? [
+            {
+              id: "act-quit",
+              section: "Система и обновления",
+              title: "Выйти полностью из программы",
+              subtitle: "Закрыть приложение и иконку в трее",
+              icon: <Power size={15} style={{ color: "#ff453a" }} />,
+              keywords: "выход закрыть полностью quit exit",
+              action: () => {
+                onClose();
+                onQuitApp();
+              },
+            },
+          ]
+        : []),
       ...(onSignOut
         ? [
             {
@@ -293,8 +350,11 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
   }, [
     backdropMode,
     modelStats,
+    onCheckUpdates,
     onClose,
+    onHideToTray,
     onOpenShareCard,
+    onQuitApp,
     onRefresh,
     onSearchModel,
     onSelectBackdrop,

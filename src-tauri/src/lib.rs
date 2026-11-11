@@ -1,20 +1,38 @@
+mod security;
+mod updater;
+mod win_native;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fs;
 use std::path::PathBuf;
-use tauri::Manager;
+use std::sync::atomic::{AtomicBool, Ordering};
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::{Emitter, Manager};
+
+use crate::security::{
+    decode_base64, ensure_main_webview, read_key_and_status, read_saved_api_key,
+    remove_all_saved_keys, sanitize_error_snippet, validate_api_key_format, write_dpapi_config,
+    KeyStorageStatus,
+};
+use crate::updater::{fetch_latest_github_release, UpdateCheckResult};
+use crate::win_native::{
+    is_autostart_enabled, load_prefs, save_prefs, set_autostart_enabled, show_windows_toast,
+    AppPreferences, NativeSettingsState,
+};
 
 const API_URL: &str = "https://true-sota.com/v1/usage";
 const MODELS_URL: &str = "https://true-sota.com/v1/models";
 const PUBLIC_PRICING_URL: &str = "https://true-sota.com/api/v1/model-pricing";
 const MONITOR_WEB_URL: &str = "https://true-sota.com/monitor";
-const CONFIG_DIR_NAME: &str = "TrueSOTA_Monitor";
-const CONFIG_FILE_NAME: &str = "truesota_config.json";
-const MAX_API_KEY_LEN: usize = 512;
 const MAX_EXPORT_BYTES: usize = 16 * 1024 * 1024;
+const TRAY_ID: &str = "main_tray";
 
 static MONITOR_EMBED_LOCK: std::sync::OnceLock<tauri::async_runtime::Mutex<()>> =
     std::sync::OnceLock::new();
+static CLOSE_TO_TRAY: AtomicBool = AtomicBool::new(true);
+static APP_EXITING: AtomicBool = AtomicBool::new(false);
 
 #[derive(Serialize, Deserialize)]
 struct GatewayPingResult {
@@ -27,93 +45,22 @@ struct GatewayPingResult {
     error: Option<String>,
 }
 
-#[derive(Serialize, Deserialize)]
-struct ConfigData {
-    api_key: String,
-}
-
-fn get_appdata_config_path() -> Option<PathBuf> {
-    if let Ok(appdata) = std::env::var("APPDATA") {
-        let dir = PathBuf::from(appdata).join(CONFIG_DIR_NAME);
-        return Some(dir.join(CONFIG_FILE_NAME));
+fn hide_main_to_tray(app: &tauri::AppHandle) {
+    if let Some(wv) = app.get_webview("monitor_embed") {
+        let _ = wv.hide();
     }
-    if let Ok(home) = std::env::var("USERPROFILE") {
-        return Some(PathBuf::from(home).join(format!(".{}", CONFIG_FILE_NAME)));
-    }
-    None
-}
-
-fn get_exe_config_path() -> Option<PathBuf> {
-    std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|d| d.join(CONFIG_FILE_NAME)))
-}
-
-fn get_legacy_home_config_path() -> Option<PathBuf> {
-    std::env::var("USERPROFILE")
-        .ok()
-        .map(|h| PathBuf::from(h).join(format!(".{}", CONFIG_FILE_NAME)))
-}
-
-fn read_key_from_path(path: &PathBuf) -> Option<String> {
-    if !path.exists() {
-        return None;
-    }
-    let content = fs::read_to_string(path).ok()?;
-    let cfg = serde_json::from_str::<ConfigData>(&content).ok()?;
-    let trimmed = cfg.api_key.trim().to_string();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(trimmed)
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.hide();
     }
 }
 
-fn ensure_main_webview(webview: &tauri::Webview) -> Result<(), String> {
-    if webview.label() != "main" {
-        return Err("Доступ запрещён вне главного окна приложения".to_string());
+fn show_main_from_tray(app: &tauri::AppHandle) {
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.unminimize();
+        let _ = win.show();
+        let _ = win.set_focus();
     }
-    Ok(())
-}
-
-fn validate_api_key_format(raw: &str) -> Result<String, String> {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return Err("Ключ не может быть пустым".to_string());
-    }
-    if trimmed.len() > MAX_API_KEY_LEN {
-        return Err("Ключ превышает допустимую длину".to_string());
-    }
-    if !trimmed
-        .chars()
-        .all(|c| c.is_ascii_graphic())
-    {
-        return Err("Ключ содержит недопустимые символы".to_string());
-    }
-    Ok(trimmed.to_string())
-}
-
-fn sanitize_error_snippet(raw: &str) -> String {
-    raw.chars()
-        .map(|c| if c.is_control() { ' ' } else { c })
-        .take(240)
-        .collect::<String>()
-        .trim()
-        .to_string()
-}
-
-fn read_saved_api_key() -> String {
-    if let Some(p) = get_appdata_config_path() {
-        if let Some(k) = read_key_from_path(&p) {
-            return k;
-        }
-    }
-    if let Some(p) = get_legacy_home_config_path() {
-        if let Some(k) = read_key_from_path(&p) {
-            return k;
-        }
-    }
-    String::new()
+    let _ = app.emit_to("main", "tray-restore", ());
 }
 
 #[tauri::command]
@@ -123,51 +70,99 @@ fn get_api_key(webview: tauri::Webview) -> Result<String, String> {
 }
 
 #[tauri::command]
+fn get_key_storage_status(webview: tauri::Webview) -> Result<KeyStorageStatus, String> {
+    ensure_main_webview(&webview)?;
+    Ok(read_key_and_status().1)
+}
+
+#[tauri::command]
 fn save_api_key(webview: tauri::Webview, key: String) -> Result<String, String> {
     ensure_main_webview(&webview)?;
-    let trimmed = validate_api_key_format(&key)?;
-
-    let path = get_appdata_config_path()
-        .ok_or_else(|| "Не удалось определить защищённый каталог настроек".to_string())?;
-
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| format!("Не удалось создать папку настроек: {}", e))?;
-    }
-
-    let cfg = ConfigData { api_key: trimmed };
-    let content = serde_json::to_string_pretty(&cfg).map_err(|e| e.to_string())?;
-    fs::write(&path, &content).map_err(|e| format!("Не удалось сохранить ключ: {}", e))?;
-
-    // Remove any stray config beside the executable so binaries stay clean for sharing
-    if let Some(exe_cfg) = get_exe_config_path() {
-        if exe_cfg != path && exe_cfg.exists() {
-            let _ = fs::remove_file(exe_cfg);
-        }
-    }
-
-    Ok("Ключ сохранён локально".to_string())
+    write_dpapi_config(&key)?;
+    Ok("Ключ зашифрован (Windows DPAPI) и сохранён локально".to_string())
 }
 
 #[tauri::command]
 fn clear_api_key(webview: tauri::Webview) -> Result<(), String> {
     ensure_main_webview(&webview)?;
-    if let Some(p) = get_appdata_config_path() {
-        if p.exists() {
-            let _ = fs::remove_file(p);
-        }
-    }
-    if let Some(p) = get_exe_config_path() {
-        if p.exists() {
-            let _ = fs::remove_file(p);
-        }
-    }
-    if let Some(p) = get_legacy_home_config_path() {
-        if p.exists() {
-            let _ = fs::remove_file(p);
-        }
+    remove_all_saved_keys();
+    Ok(())
+}
+
+#[tauri::command]
+fn get_app_preferences(webview: tauri::Webview) -> Result<NativeSettingsState, String> {
+    ensure_main_webview(&webview)?;
+    let prefs = load_prefs();
+    CLOSE_TO_TRAY.store(prefs.close_to_tray, Ordering::Relaxed);
+    Ok(NativeSettingsState {
+        close_to_tray: prefs.close_to_tray,
+        autostart: is_autostart_enabled(),
+    })
+}
+
+#[tauri::command]
+fn set_close_to_tray(webview: tauri::Webview, enabled: bool) -> Result<bool, String> {
+    ensure_main_webview(&webview)?;
+    CLOSE_TO_TRAY.store(enabled, Ordering::Relaxed);
+    save_prefs(&AppPreferences {
+        close_to_tray: enabled,
+    })?;
+    Ok(enabled)
+}
+
+#[tauri::command]
+fn set_autostart(webview: tauri::Webview, enabled: bool) -> Result<bool, String> {
+    ensure_main_webview(&webview)?;
+    set_autostart_enabled(enabled)
+}
+
+#[tauri::command]
+fn update_tray_status(
+    app: tauri::AppHandle,
+    webview: tauri::Webview,
+    summary: String,
+) -> Result<(), String> {
+    ensure_main_webview(&webview)?;
+    let clean: String = summary
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .take(118)
+        .collect::<String>()
+        .trim()
+        .to_string();
+    let tip = if clean.is_empty() {
+        "TrueSOTA Usage Monitor".to_string()
+    } else {
+        clean
+    };
+    if let Some(tray) = app.tray_by_id(TRAY_ID) {
+        let _ = tray.set_tooltip(Some(tip));
     }
     Ok(())
+}
+
+#[tauri::command]
+async fn send_windows_notification(
+    webview: tauri::Webview,
+    title: String,
+    body: String,
+) -> Result<(), String> {
+    ensure_main_webview(&webview)?;
+    tauri::async_runtime::spawn_blocking(move || show_windows_toast(&title, &body))
+        .await
+        .map_err(|e| format!("Notification task error: {}", e))?
+}
+
+#[tauri::command]
+async fn check_app_update(
+    app: tauri::AppHandle,
+    webview: tauri::Webview,
+) -> Result<UpdateCheckResult, String> {
+    ensure_main_webview(&webview)?;
+    let current = app.package_info().version.to_string();
+    tauri::async_runtime::spawn_blocking(move || fetch_latest_github_release(&current))
+        .await
+        .map_err(|e| format!("Update check task error: {}", e))?
 }
 
 fn resolve_api_key(api_key: Option<String>) -> Result<String, String> {
@@ -508,8 +503,31 @@ fn set_window_vibrancy(window: tauri::WebviewWindow, effect: String) -> Result<(
 }
 
 #[tauri::command]
-fn window_close(window: tauri::WebviewWindow) -> Result<(), String> {
-    window.close().map_err(|e| e.to_string())
+fn window_close(app: tauri::AppHandle, window: tauri::WebviewWindow) -> Result<(), String> {
+    if CLOSE_TO_TRAY.load(Ordering::Relaxed) && !APP_EXITING.load(Ordering::Relaxed) {
+        hide_main_to_tray(&app);
+        Ok(())
+    } else {
+        APP_EXITING.store(true, Ordering::Relaxed);
+        app.exit(0);
+        let _ = window;
+        Ok(())
+    }
+}
+
+#[tauri::command]
+fn window_hide_to_tray(app: tauri::AppHandle, webview: tauri::Webview) -> Result<(), String> {
+    ensure_main_webview(&webview)?;
+    hide_main_to_tray(&app);
+    Ok(())
+}
+
+#[tauri::command]
+fn window_quit(app: tauri::AppHandle, webview: tauri::Webview) -> Result<(), String> {
+    ensure_main_webview(&webview)?;
+    APP_EXITING.store(true, Ordering::Relaxed);
+    app.exit(0);
+    Ok(())
 }
 
 #[tauri::command]
@@ -580,42 +598,6 @@ fn set_compact_expanded(window: tauri::WebviewWindow, expanded: bool) -> Result<
     Ok(())
 }
 
-// ========================================================
-// Export File Helper (Downloads folder)
-// ========================================================
-fn decode_base64(input: &str) -> Result<Vec<u8>, String> {
-    let cleaned: String = input.chars().filter(|c| !c.is_whitespace()).collect();
-    if cleaned.len() % 4 != 0 {
-        return Err("Invalid base64 length".to_string());
-    }
-    let mut out = Vec::with_capacity((cleaned.len() / 4) * 3);
-    let bytes = cleaned.as_bytes();
-    let val = |b: u8| -> Result<u8, String> {
-        match b {
-            b'A'..=b'Z' => Ok(b - b'A'),
-            b'a'..=b'z' => Ok(b - b'a' + 26),
-            b'0'..=b'9' => Ok(b - b'0' + 52),
-            b'+' => Ok(62),
-            b'/' => Ok(63),
-            _ => Err("Invalid base64 char".to_string()),
-        }
-    };
-    for chunk in bytes.chunks(4) {
-        let a = val(chunk[0])?;
-        let b = val(chunk[1])?;
-        out.push((a << 2) | (b >> 4));
-        if chunk[2] != b'=' {
-            let c = val(chunk[2])?;
-            out.push((b << 4) | (c >> 2));
-            if chunk[3] != b'=' {
-                let d = val(chunk[3])?;
-                out.push((c << 6) | d);
-            }
-        }
-    }
-    Ok(out)
-}
-
 #[tauri::command]
 fn save_export_file(
     webview: tauri::Webview,
@@ -634,10 +616,7 @@ fn save_export_file(
         .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_' || *c == '.')
         .collect();
 
-    if safe_name.is_empty()
-        || safe_name.starts_with('.')
-        || safe_name.contains("..")
-    {
+    if safe_name.is_empty() || safe_name.starts_with('.') || safe_name.contains("..") {
         return Err("Недопустимое имя файла экспорта".to_string());
     }
 
@@ -693,20 +672,106 @@ fn save_export_file(
     Ok(full_path.display().to_string())
 }
 
+fn setup_tray_icon(app: &tauri::App) -> tauri::Result<()> {
+    let show_item = MenuItem::with_id(app, "tray_show", "Открыть TrueSOTA Monitor", true, None::<&str>)?;
+    let island_item = MenuItem::with_id(app, "tray_island", "Режим «Островок»", true, None::<&str>)?;
+    let refresh_item = MenuItem::with_id(app, "tray_refresh", "Обновить квоту", true, None::<&str>)?;
+    let sep = PredefinedMenuItem::separator(app)?;
+    let quit_item = MenuItem::with_id(app, "tray_quit", "Выйти полностью", true, None::<&str>)?;
+
+    let menu = Menu::with_items(app, &[&show_item, &island_item, &refresh_item, &sep, &quit_item])?;
+
+    let mut builder = TrayIconBuilder::with_id(TRAY_ID)
+        .menu(&menu)
+        .tooltip("TrueSOTA Usage Monitor")
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "tray_show" => show_main_from_tray(app),
+            "tray_island" => {
+                show_main_from_tray(app);
+                let _ = app.emit_to("main", "tray-toggle-island", ());
+            }
+            "tray_refresh" => {
+                let _ = app.emit_to("main", "tray-refresh", ());
+            }
+            "tray_quit" => {
+                APP_EXITING.store(true, Ordering::Relaxed);
+                app.exit(0);
+            }
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                let app = tray.app_handle();
+                if let Some(win) = app.get_webview_window("main") {
+                    let visible = win.is_visible().unwrap_or(false);
+                    let minimized = win.is_minimized().unwrap_or(false);
+                    if visible && !minimized {
+                        hide_main_to_tray(app);
+                    } else {
+                        show_main_from_tray(app);
+                    }
+                }
+            }
+        });
+
+    if let Some(icon) = app.default_window_icon().cloned() {
+        builder = builder.icon(icon);
+    }
+
+    builder.build(app)?;
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
+            let prefs = load_prefs();
+            CLOSE_TO_TRAY.store(prefs.close_to_tray, Ordering::Relaxed);
+
+            // Auto-migrate legacy plaintext API key to Windows DPAPI on boot if present
+            let _ = read_key_and_status();
+
+            setup_tray_icon(app)?;
+
+            let start_minimized = std::env::args().any(|a| a == "--minimized");
             if let Some(win) = app.get_webview_window("main") {
                 apply_backdrop_effect(&win, "mica");
+                if start_minimized {
+                    let _ = win.hide();
+                }
             }
             Ok(())
         })
+        .on_window_event(|window, event| {
+            if window.label() == "main" {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    if CLOSE_TO_TRAY.load(Ordering::Relaxed) && !APP_EXITING.load(Ordering::Relaxed)
+                    {
+                        api.prevent_close();
+                        hide_main_to_tray(window.app_handle());
+                    }
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             get_api_key,
+            get_key_storage_status,
             save_api_key,
             clear_api_key,
+            get_app_preferences,
+            set_close_to_tray,
+            set_autostart,
+            update_tray_status,
+            send_windows_notification,
+            check_app_update,
             fetch_usage,
             fetch_model_pricing,
             fetch_key_models,
@@ -715,12 +780,14 @@ pub fn run() {
             reload_monitor_embed,
             navigate_monitor_embed,
             open_monitor_window,
-            set_window_mode,
-            set_compact_expanded,
             set_window_vibrancy,
             window_close,
+            window_hide_to_tray,
+            window_quit,
             window_minimize,
             window_toggle_maximize,
+            set_window_mode,
+            set_compact_expanded,
             save_export_file
         ])
         .run(tauri::generate_context!())

@@ -153,7 +153,7 @@ export const WelcomeAuth: React.FC<WelcomeAuthProps> = ({
         <div className="welcome-hero">
           <div className="welcome-security-pill">
             <ShieldCheck size={13} style={{ color: "var(--apple-green)" }} />
-            <span>Локальное хранение ключа • Подходит любой API ключ</span>
+            <span>Шифрование Windows DPAPI • Подходит любой API ключ</span>
           </div>
 
           <div className="welcome-title-wrap">
@@ -264,7 +264,7 @@ export const WelcomeAuth: React.FC<WelcomeAuthProps> = ({
 
               <div className="welcome-submit-row">
                 <span className="welcome-privacy-hint">
-                  Сохраняется локально в <code>%APPDATA%\TrueSOTA_Monitor</code>
+                  Шифруется через Windows DPAPI в <code>%APPDATA%\TrueSOTA_Monitor</code>
                 </span>
 
                 <SpecularButton
