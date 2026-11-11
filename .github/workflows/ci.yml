@@ -1,0 +1,44 @@
+name: CI Build & Tests
+
+on:
+  push:
+    branches: ["main"]
+    paths-ignore:
+      - "README*.md"
+      - "LICENSE"
+      - "SECURITY.md"
+      - "docs/**"
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "src-tauri -> target"
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: TypeScript check & Vite build
+        run: npm run build
+
+      - name: Rust unit tests & compile check
+        working-directory: src-tauri
+        run: cargo test --lib

@@ -1,6 +1,8 @@
 <div align="center">
 
-<br />
+<p>
+  <b>🇷🇺 Русский</b> &nbsp;·&nbsp; <a href="README.en.md">🇬🇧 English</a>
+</p>
 
 <h1>TrueSOTA Usage Monitor</h1>
 
@@ -14,6 +16,12 @@
   </a>
   <a href="https://github.com/afk3drp-dev/truesota-monitor/releases">
     <img src="https://img.shields.io/github/downloads/afk3drp-dev/truesota-monitor/total?style=for-the-badge&label=Downloads&labelColor=09090b&color=30d158" alt="Downloads" />
+  </a>
+  <a href="https://github.com/afk3drp-dev/truesota-monitor/actions/workflows/ci.yml">
+    <img src="https://img.shields.io/github/actions/workflow/status/afk3drp-dev/truesota-monitor/ci.yml?branch=main&style=for-the-badge&label=CI&labelColor=09090b&color=30d158" alt="CI Status" />
+  </a>
+  <a href="LICENSE">
+    <img src="https://img.shields.io/github/license/afk3drp-dev/truesota-monitor?style=for-the-badge&label=License&labelColor=09090b&color=27272a" alt="MIT License" />
   </a>
   <img src="https://img.shields.io/badge/Windows%2011-09090b?style=for-the-badge&logo=windows11&logoColor=ffffff" alt="Windows 11" />
   <img src="https://img.shields.io/badge/Tauri%20v2%20%C2%B7%20Rust-09090b?style=for-the-badge&logo=tauri&logoColor=ffffff" alt="Tauri v2 & Rust" />
@@ -59,12 +67,31 @@
 
 ## Что скачать
 
-Скачайте файлы со страницы [**Releases (v1.2.0)**](https://github.com/afk3drp-dev/truesota-monitor/releases/latest):
+Скачайте файлы со страницы [**Releases (v1.2.0)**](https://github.com/afk3drp-dev/truesota-monitor/releases/latest) или с [официальной промо-страницы](https://afk3drp-dev.github.io/truesota-monitor/#download):
 
 | Файл | Формат | Кому подойдёт |
 | :--- | :--- | :--- |
-| **`TrueSOTA_Monitor_Installers.zip`** | Архив (`NSIS` + `MSI` + `README.md`) | Рекомендуемый пакет: содержит стандартный установщик `TrueSOTA_Installer.exe` и корпоративный `TrueSOTA_Setup.msi` |
-| **`TrueSOTA_Monitor_Tauri.exe`** | Portable (один `.exe`) | Запуск сразу без установки (подойдёт для флешки или отдельной папки) |
+| [**`TrueSOTA_Monitor_Installers.zip`**](https://github.com/afk3drp-dev/truesota-monitor/releases/download/v1.2.0/TrueSOTA_Monitor_Installers.zip) | Архив (`NSIS` + `MSI` + `README.md`) | Рекомендуемый пакет: содержит стандартный установщик `TrueSOTA_Installer.exe` и корпоративный `TrueSOTA_Setup.msi` |
+| [**`TrueSOTA_Monitor_Tauri.exe`**](https://github.com/afk3drp-dev/truesota-monitor/releases/download/v1.2.0/TrueSOTA_Monitor_Tauri.exe) | Portable (один `.exe`) | Запуск сразу без установки (подойдёт для флешки или отдельной папки) |
+
+<details>
+<summary><b>Контрольные суммы SHA-256 и проверка целостности (PowerShell)</b></summary>
+
+<br />
+
+| Файл (`v1.2.0`) | SHA-256 |
+| :--- | :--- |
+| `TrueSOTA_Monitor_Installers.zip` | `E2BFB91CB5DA6F9D4DBC129EC5661A8F5006326C75F70DA31B7B44D9988FBA8D` |
+| `TrueSOTA_Monitor_Tauri.exe` | `30EA9442215A87E080FE3A2A6B09F7B75E92F91A7A57F99E994B9DF3D8C9AF74` |
+
+```powershell
+Get-FileHash .\TrueSOTA_Monitor_Installers.zip -Algorithm SHA256
+Get-FileHash .\TrueSOTA_Monitor_Tauri.exe -Algorithm SHA256
+```
+
+Подробнее о безопасности и отчётах об уязвимостях — в [SECURITY.md](SECURITY.md).
+
+</details>
 
 <details>
 <summary><b>Подсказка про Windows SmartScreen</b></summary>

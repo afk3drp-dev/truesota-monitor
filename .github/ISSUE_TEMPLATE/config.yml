@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Live Демо и сайт проекта
+    url: https://afk3drp-dev.github.io/truesota-monitor/
+    about: Попробовать интерфейс онлайн в браузере без установки
+  - name: Связь с автором в Telegram (@afk3drp)
+    url: https://t.me/afk3drp
+    about: Быстрые вопросы по использованию, пожелания и обратная связь

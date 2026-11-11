@@ -1,0 +1,40 @@
+name: "Сообщить об ошибке (Bug Report)"
+description: "Проблема с запуском, API, треем, вёрсткой или сохранением ключа"
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Спасибо за репорт! Пожалуйста, **никогда не вставляйте сюда свой реальный API-ключ**.
+  - type: input
+    id: app_version
+    attributes:
+      label: Версия приложения
+      description: Посмотреть можно во вкладке Настройки или в меню профиля
+      placeholder: "v1.2.0 (Installer / Portable)"
+    validations:
+      required: true
+  - type: input
+    id: os_version
+    attributes:
+      label: Версия Windows
+      placeholder: "Windows 11 24H2 x64"
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Что пошло не так и как воспроизвести
+      description: Опишите шаги воспроизведения и ожидаемое поведение
+      placeholder: |
+        1. Открыл вкладку ...
+        2. Нажал ...
+        3. Произошло ...
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: Скриншот или текст ошибки (необязательно)
+      description: Можно перетащить скриншот прямо в это поле

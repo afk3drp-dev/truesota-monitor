@@ -1,0 +1,19 @@
+name: "Предложить идею (Feature Request)"
+description: "Новая функция, график, настройка трея или улучшение интерфейса"
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Какую задачу это решит?
+      placeholder: "Например: удобно видеть расходы за выбранный месяц или отдельный алерт на дневной лимит..."
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Как это должно работать
+      placeholder: Опишите желаемый сценарий или внешний вид фичи
+    validations:
+      required: true
