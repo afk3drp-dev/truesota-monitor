@@ -1,74 +1,137 @@
-# TrueSOTA Usage Monitor
+<div align="center">
 
-Настольная программа для Windows, которая позволяет в реальном времени следить за балансом, расходом квот, тарифами моделей и работой серверов **TrueSOTA** прямо с рабочего стола, не открывая каждый раз браузер.
+<br />
 
-> В программе нет встроенных или чужих API-ключей — при первом запуске каждый пользователь вводит свой личный ключ. Он шифруется через встроенную защиту Windows DPAPI и хранится только локально на вашем компьютере в `%APPDATA%\TrueSOTA_Monitor\truesota_config.json`.
+<h1>TrueSOTA Usage Monitor</h1>
 
----
+<p>
+  <strong>Настольный OLED-клиент для Windows 11</strong> — баланс, квоты, тарифы моделей, аудит Prompt Cache и статус шлюза TrueSOTA прямо с рабочего стола.
+</p>
 
-## Скриншоты
+<p>
+  <a href="https://github.com/afk3drp-dev/truesota-monitor/releases/latest">
+    <img src="https://img.shields.io/github/v/release/afk3drp-dev/truesota-monitor?style=for-the-badge&label=Release&labelColor=09090b&color=ffffff" alt="Latest Release" />
+  </a>
+  <a href="https://github.com/afk3drp-dev/truesota-monitor/releases">
+    <img src="https://img.shields.io/github/downloads/afk3drp-dev/truesota-monitor/total?style=for-the-badge&label=Downloads&labelColor=09090b&color=30d158" alt="Downloads" />
+  </a>
+  <img src="https://img.shields.io/badge/Windows%2011-09090b?style=for-the-badge&logo=windows11&logoColor=ffffff" alt="Windows 11" />
+  <img src="https://img.shields.io/badge/Tauri%20v2%20%C2%B7%20Rust-09090b?style=for-the-badge&logo=tauri&logoColor=ffffff" alt="Tauri v2 & Rust" />
+  <img src="https://img.shields.io/badge/Windows%20DPAPI-Encrypted-09090b?style=for-the-badge&logo=shield&logoColor=30d158" alt="Windows DPAPI" />
+</p>
 
-| Обзор квоты и расхода | Экран входа по ключу |
-| :---: | :---: |
-| ![Обзор квоты и расхода](docs/screenshots/overview.jpg) | ![Экран входа по ключу](docs/screenshots/login.jpg) |
+<p>
+  <a href="https://github.com/afk3drp-dev/truesota-monitor/releases/latest">
+    <img src="https://img.shields.io/badge/%E2%AC%87%EF%B8%8F%20%D0%A1%D0%BA%D0%B0%D1%87%D0%B0%D1%82%D1%8C%20%D0%B4%D0%BB%D1%8F%20Windows%20(v1.2.0)-ffffff?style=for-the-badge" alt="Download Windows" />
+  </a>
+  &nbsp;
+  <a href="https://t.me/afk3drp">
+    <img src="https://img.shields.io/badge/Telegram-@afk3drp-09090b?style=for-the-badge&logo=telegram&logoColor=29b6f6" alt="Telegram @afk3drp" />
+  </a>
+</p>
 
-| Тарифы моделей и групп | Аналитика и аудит кэша |
-| :---: | :---: |
-| ![Тарифы моделей и групп](docs/screenshots/pricing.jpg) | ![Аналитика и аудит кэша](docs/screenshots/analytics.jpg) |
+<br />
 
----
+<img src="docs/hero_showcase.png" alt="TrueSOTA Usage Monitor Showcase" width="100%" />
 
-## Что умеет программа
+</div>
 
-- **Мониторинг баланса и расхода**  
-  Показывает общий лимит, остаток квоты, расходы за период, количество запросов и токенов, а также подробную статистику по каждой модели и экономию за счёт кэширования (Prompt Cache).
+<br />
 
-- **График активности по дням**  
-  Таблица активности за последние 22 недели с переключением режима отображения (`Расход $` / `Токены` / `Запросы`) и подсчётом серий активности.
-
-- **Каталог тарифов и доступных моделей**  
-  Загружает актуальные цены и коэффициенты групп с [`true-sota.com/model-pricing`](https://true-sota.com/model-pricing), позволяет фильтровать модели, проверять доступность по вашему API-ключу и копировать ID нужной модели в один клик.
-
-- **Встроенный мониторинг каналов и пинг API**  
-  Отдельная вкладка с живой страницей статуса [`true-sota.com/monitor`](https://true-sota.com/monitor) (после входа в аккаунт сессия сохраняется локально) и автоматической проверкой задержки ответа API-шлюза.
-
-- **Компактный портретный интерфейс и меню (`Ctrl+K`)**  
-  Чистая OLED-тема (чёрный фон, белый контрастный текст), портретный режим окна `620×900` по умолчанию и пресеты под `1920×1080`, свайп-вкладки, меню аккаунта, мини-виджет поверх всех окон и быстрый поиск действий по `Ctrl+K`.
-
-- **Системный трей, автозапуск и уведомления Windows**  
-  Сворачивание в системный трей около часов (с показом текущего остатка при наведении), опция запуска вместе с Windows, а также уведомления при падении остатка квоты ниже заданного порога или сбое API-шлюза.
-
-- **Автопроверка обновлений**  
-  Программа проверяет свежие релизы в репозитории GitHub (`afk3drp-dev/truesota-monitor`) и предупреждает о выходе новой версии.
-
-- **Экспорт статистики**  
-  Сохранение сводной карточки в PNG (и быстрое копирование в буфер обмена), а также выгрузка отчётов в форматах `CSV` и `Markdown` в папку `Downloads`.
+> **Без встроенных ключей и телеметрии:** при первом запуске каждый пользователь вводит свой личный API-ключ. Токен шифруется через встроенный **Windows DPAPI** и хранится только локально в `%APPDATA%\TrueSOTA_Monitor\truesota_config.json`.
 
 ---
 
-## Установка и запуск
+## Возможности
 
-Скачайте архив **`TrueSOTA_Monitor_Installers.zip`** со страницы [**Releases**](../../releases) и распакуйте его:
-
-- **`TrueSOTA_Installer.exe`** — стандартный установщик для Windows (рекомендуется).
-- **`TrueSOTA_Setup.msi`** — установщик формата Microsoft Installer (MSI).
-- **`TrueSOTA_Monitor_Tauri.exe`** — переносная версия (Portable), запускается сразу без установки (если добавлена в релиз отдельно).
-
-> При первом запуске Windows SmartScreen может показать предупреждение, так как программа не подписана коммерческим сертификатом. Чтобы продолжить, нажмите **«Подробнее» → «Выполнить в любом случае»**.
+| Мониторинг и Аналитика | Интерфейс и Удобство | Система и Приватность |
+| :--- | :--- | :--- |
+| **Квота и расход в реальном времени** — баланс, лимит, RPM/TPM и динамика за 14 дней | **Pure OLED тема** — чистый чёрный фон, высокий белый контраст и анимации `SmoothTab` | **Шифрование Windows DPAPI** — ключ привязан к вашей учётной записи Windows |
+| **Аудит Prompt Cache** — сколько токенов взято из кэша и сколько денег сэкономлено | **Портрет `620×900` + `1920×1080`** — компактная карточка по умолчанию и пресеты окна | **Системный трей и автозапуск** — сворачивание по `×` к часам и тихий старт с Windows |
+| **Тепловая карта (22 недели)** — активность по дням в режимах `Расход $` / `Токены` / `Запросы` | **Командная палитра `Ctrl+K`** — мгновенный поиск нейросетей, вкладок и переключение режимов | **Windows-уведомления** — алерты при низком остатке квоты и сбое/восстановлении API |
+| **Каталог тарифов и монитор** — цены, мультипликаторы групп и встроенный `true-sota.com/monitor` | **Dynamic Island + Share Card** — мини-виджет поверх окон и экспорт карточки в PNG / CSV / MD | **Автопроверка обновлений** — отслеживание новых релизов прямо из `GitHub Releases` |
 
 ---
 
-## Приватность и безопасность
+## Что скачать
 
-- Все запросы программы отправляются только на официальные адреса `https://true-sota.com` (мониторинг/тарифы) и `https://api.github.com/repos/afk3drp-dev/truesota-monitor/releases/latest` (проверка новых версий).
-- Пользовательский API-ключ шифруется через **Windows DPAPI** (в привязке к вашей учётной записи Windows) в `%APPDATA%\TrueSOTA_Monitor\truesota_config.json`, не передаётся третьим лицам и не сохраняется рядом с `.exe`.
-- Включены строгая политика безопасности WebView (CSP) и изоляция прав доступа только для локального окна программы, а экспорт отчётов защищён от подстановки формул и небезопасных путей.
+Скачайте файлы со страницы [**Releases (v1.2.0)**](https://github.com/afk3drp-dev/truesota-monitor/releases/latest):
+
+| Файл | Формат | Кому подойдёт |
+| :--- | :--- | :--- |
+| **`TrueSOTA_Monitor_Installers.zip`** | Архив (`NSIS` + `MSI` + `README.md`) | Рекомендуемый пакет: содержит стандартный установщик `TrueSOTA_Installer.exe` и корпоративный `TrueSOTA_Setup.msi` |
+| **`TrueSOTA_Monitor_Tauri.exe`** | Portable (один `.exe`) | Запуск сразу без установки (подойдёт для флешки или отдельной папки) |
+
+<details>
+<summary><b>Подсказка про Windows SmartScreen</b></summary>
+
+<br />
+
+Программа не подписана платным EV-сертификатом, поэтому при первом запуске Windows SmartScreen может показать предупреждение о неизвестном издателе.  
+Чтобы открыть приложение, нажмите **«Подробнее» → «Выполнить в любом случае»**.
+
+</details>
+
+---
+
+## Галерея интерфейса
+
+<details>
+<summary><b>Открыть все экраны приложения (7 скриншотов)</b></summary>
+
+<br />
+
+| Обзор квоты (`620×900`) | Меню аккаунта (`ProfileDropdown`) | Командная палитра (`Ctrl+K`) |
+| :---: | :---: | :---: |
+| ![Обзор квоты](docs/screenshots/overview.jpg) | ![Меню аккаунта](docs/screenshots/profile_menu.jpg) | ![Командная палитра](docs/screenshots/command_palette.jpg) |
+
+| Тарифы и фильтры | Тепловая карта и Audit кэша | Настройки и трей | Экран входа (`DPAPI`) |
+| :---: | :---: | :---: | :---: |
+| ![Тарифы моделей](docs/screenshots/pricing.jpg) | ![Аналитика и кэш](docs/screenshots/analytics.jpg) | ![Настройки](docs/screenshots/settings.jpg) | ![Экран входа](docs/screenshots/login.jpg) |
+
+</details>
+
+---
+
+## Горячие клавиши и режимы окна
+
+<details>
+<summary><b>Шпаргалка по сочетаниям и пресетам размера</b></summary>
+
+<br />
+
+| Действие | Сочетание / Где |
+| :--- | :--- |
+| Открыть командную палитру | `Ctrl + K` |
+| Переключить мини-виджет (**Dynamic Island**) | `Alt + I` или кнопка **«Островок»** |
+| Выбрать размер окна (`620×900`, `880×880`, `1600×940`, Fullscreen) | `Ctrl + K` → **Размер окна** или вкладка **Настройки** |
+| Скопировать ID модели в буфер | Клик по любой строке во вкладке **Тарифы** или **Модели** |
+
+</details>
+
+---
+
+## Приватность и архитектура
+
+```mermaid
+flowchart LR
+  U["API-ключ пользователя"] -->|"CryptProtectData"| D["Windows DPAPI (%APPDATA%)"]
+  D -->|"Локальное чтение (Rust)"| R["TrueSOTA Tauri Core"]
+  R -->|"HTTPS API и тарифы"| T["true-sota.com"]
+  R -->|"Только проверка тега версии"| G["api.github.com (Releases)"]
+```
+
+- Сетевые запросы отправляются только на официальный шлюз [`https://true-sota.com`](https://true-sota.com) и на публичный endpoint релизов GitHub (`afk3drp-dev/truesota-monitor/releases/latest`).
+- Включены строгая политика безопасности WebView (`CSP`), изоляция Tauri capabilities и защита экспорта отчетов (`CSV` formula injection guard & safe paths).
 
 ---
 
 ## Сборка из исходников
 
-Для самостоятельной сборки потребуются **Node.js 20+**, **Rust (MSVC)** и **WebView2**:
+<details>
+<summary><b>Команды для локальной сборки (Node.js 20+ · Rust MSVC · WebView2)</b></summary>
+
+<br />
 
 ```powershell
 npm install
@@ -76,6 +139,12 @@ npm run build
 npm run tauri build
 ```
 
+Готовый `.exe` и установщики появятся в `src-tauri/target/release/` и `src-tauri/target/release/bundle/`.
+
+</details>
+
 ---
 
-Разработчик: [@afk3drp](https://t.me/afk3drp)
+<div align="center">
+  <sub>Сделано <a href="https://t.me/afk3drp">@afk3drp</a> · На базе Tauri v2, React 19 и Rust</sub>
+</div>
