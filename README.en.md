@@ -89,7 +89,7 @@ Get-FileHash .\TrueSOTA_Monitor_Installers.zip -Algorithm SHA256
 Get-FileHash .\TrueSOTA_Monitor_Tauri.exe -Algorithm SHA256
 ```
 
-See [SECURITY.md](SECURITY.md) for architecture details and vulnerability reporting.
+See [SECURITY.md](SECURITY.md) for architecture details and [CHANGELOG.md](CHANGELOG.md) for version history.
 
 </details>
 
