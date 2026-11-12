@@ -371,10 +371,16 @@ button { font-family: inherit; cursor: pointer; }
 .app-viewport::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.16); border-radius: 4px; }
 
 .bento-card {
-  background: var(--surface);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.025) 0%, rgba(255, 255, 255, 0) 45%), var(--surface);
   border: 1px solid var(--border);
   border-radius: 14px;
   padding: 14px;
+}
+
+.bento-card.hero-aura-good {
+  background: radial-gradient(circle at 16% 60%, rgba(48, 209, 88, 0.1) 0%, transparent 56%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, rgba(255, 255, 255, 0) 45%),
+    var(--surface);
 }
 
 .card-kicker {
@@ -395,7 +401,11 @@ button { font-family: inherit; cursor: pointer; }
 
 .quota-row { display: flex; align-items: center; gap: 16px; margin-top: 8px; }
 .quota-val { font-size: 1.75rem; font-weight: 800; letter-spacing: -0.03em; }
-.quota-meta { font-size: 0.75rem; color: var(--text-sec); display: flex; flex-direction: column; gap: 3px; margin-top: 4px; }
+.quota-val .dec-part, .big-money .dec-part { color: var(--text-sec); font-weight: 500; font-size: 0.78em; }
+.quota-bar-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.quota-bar-track { flex: 1; height: 4px; border-radius: 999px; background: rgba(255, 255, 255, 0.08); overflow: hidden; }
+.quota-bar-fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg, rgba(255, 255, 255, 0.8), #30d158); }
+.quota-meta { font-size: 0.75rem; color: var(--text-sec); display: flex; flex-direction: column; gap: 3px; margin-top: 6px; }
 .big-money { font-size: 1.5rem; font-weight: 800; letter-spacing: -0.025em; margin: 6px 0 8px; }
 .old-money { font-size: 0.85rem; color: var(--text-muted); text-decoration: line-through; margin-left: 6px; font-weight: 500; }
 .green-pill {
@@ -405,16 +415,24 @@ button { font-family: inherit; cursor: pointer; }
 .kv-row { display: flex; justify-content: space-between; font-size: 0.74rem; padding: 3px 0; color: var(--text-sec); }
 .kv-row strong { color: #fff; font-weight: 600; }
 
-.insights-row {
-  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 10px;
+.insights-row.telemetry-dock {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0; margin-top: 10px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.024) 0%, rgba(255, 255, 255, 0) 48%), var(--surface);
+  border: 1px solid var(--border); border-radius: 14px; overflow: hidden;
 }
-.app-window.is-wide .insights-row { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.app-window.is-wide .insights-row.telemetry-dock { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 
 .insight-card {
   display: flex; align-items: center; gap: 10px;
-  padding: 10px 12px; border-radius: 12px;
-  background: var(--surface); border: 1px solid var(--border);
+  padding: 10px 12px; border-radius: 0;
+  background: transparent; border: none;
+  border-right: 1px solid rgba(255, 255, 255, 0.065);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.065);
 }
+.app-window:not(.is-wide) .insight-card:nth-child(2n) { border-right: none; }
+.app-window:not(.is-wide) .insight-card:nth-child(n + 3) { border-bottom: none; }
+.app-window.is-wide .insight-card { border-bottom: none; }
+.app-window.is-wide .insight-card:last-child { border-right: none; }
 .insight-ico {
   width: 28px; height: 28px; border-radius: 8px;
   display: grid; place-items: center; font-size: 0.8rem;
@@ -422,6 +440,9 @@ button { font-family: inherit; cursor: pointer; }
 }
 .insight-v { font-size: 0.92rem; font-weight: 700; }
 .insight-s { font-size: 0.66rem; color: var(--text-muted); }
+
+.area-sim-svg { width: 100%; height: 118px; display: block; margin-top: 12px; }
+.area-sim-ticks { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: 0.6rem; color: var(--text-muted); margin-top: 4px; padding: 0 4px; }
 
 /* Chart */
 .chart-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }

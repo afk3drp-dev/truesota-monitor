@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.9.0.schema.json
+
+PackageIdentifier: afk3drp-dev.TrueSOTAMonitor
+PackageVersion: 1.3.0
+InstallerType: zip
+NestedInstallerType: msi
+NestedInstallerFiles:
+  - RelativeFilePath: TrueSOTA_Setup.msi
+UpgradeBehavior: install
+ProductCode: '{BAF3DE18-7B94-4861-97A9-8E9AC988A454}'
+ReleaseDate: 2026-11-12
+AppsAndFeaturesEntries:
+  - DisplayName: TrueSOTA Monitor
+    Publisher: truesota
+    DisplayVersion: 1.3.0
+    ProductCode: '{BAF3DE18-7B94-4861-97A9-8E9AC988A454}'
+    UpgradeCode: '{1940873C-6963-501B-BE70-7E115E5CD4CC}'
+Installers:
+  - Architecture: x64
+    InstallerUrl: https://github.com/afk3drp-dev/truesota-monitor/releases/download/v1.3.0/TrueSOTA_Monitor_Installers.zip
+    InstallerSha256: 4AEE319DCD8607466E2FD14BC0304FCD1B3E78EBCC3097AE4EEA6D4D841E4E73
+ManifestType: installer
+ManifestVersion: 1.9.0

@@ -165,6 +165,106 @@ function formatNumber(num: number): string {
   return num.toLocaleString();
 }
 
+type ChartMetric = "cost" | "requests" | "tokens";
+type ChartViewMode = "area" | "bars";
+
+function getChartMetricValue(day: DailyUsageItem, metric: ChartMetric): number {
+  if (metric === "requests") return day.requests || 0;
+  if (metric === "tokens") return day.total_tokens || 0;
+  return day.actual_cost ?? day.cost ?? 0;
+}
+
+/** Builds smooth cubic Bezier SVG paths (stroke + closed bottom area) for telemetry sparklines. */
+function buildSmoothCurvePaths(
+  points: { x: number; y: number }[],
+  baselineY: number
+): { linePath: string; areaPath: string } {
+  if (points.length === 0) return { linePath: "", areaPath: "" };
+  if (points.length === 1) {
+    const p = points[0];
+    return {
+      linePath: `M ${p.x} ${p.y}`,
+      areaPath: `M ${p.x} ${baselineY} L ${p.x} ${p.y} L ${p.x} ${baselineY} Z`,
+    };
+  }
+  const cmds: string[] = [`M ${points[0].x.toFixed(2)} ${points[0].y.toFixed(2)}`];
+  for (let i = 0; i < points.length - 1; i++) {
+    const p0 = points[Math.max(0, i - 1)];
+    const p1 = points[i];
+    const p2 = points[i + 1];
+    const p3 = points[Math.min(points.length - 1, i + 2)];
+    const cp1x = p1.x + (p2.x - p0.x) / 6;
+    const cp1y = p1.y + (p2.y - p0.y) / 6;
+    const cp2x = p2.x - (p3.x - p1.x) / 6;
+    const cp2y = p2.y - (p3.y - p1.y) / 6;
+    cmds.push(
+      `C ${cp1x.toFixed(2)} ${cp1y.toFixed(2)}, ${cp2x.toFixed(2)} ${cp2y.toFixed(2)}, ${p2.x.toFixed(2)} ${p2.y.toFixed(2)}`
+    );
+  }
+  const linePath = cmds.join(" ");
+  const last = points[points.length - 1];
+  const first = points[0];
+  const areaPath = `${linePath} L ${last.x.toFixed(2)} ${baselineY.toFixed(2)} L ${first.x.toFixed(2)} ${baselineY.toFixed(2)} Z`;
+  return { linePath, areaPath };
+}
+
+function createBrowserPreviewData(): TrueSotaResponse {
+  const days = Array.from({ length: 14 }, (_, i) => {
+    const date = new Date(Date.now() - (13 - i) * 86400_000).toISOString().slice(0, 10);
+    const wave = [14.2, 18.8, 12.1, 24.5, 31.4, 21.8, 16.4, 28.9, 36.2, 44.1, 22.6, 19.3, 27.8, 18.4][i];
+    const reqs = Math.round(wave * 11.4);
+    return {
+      date,
+      requests: reqs,
+      input_tokens: Math.round(reqs * 4200),
+      output_tokens: Math.round(reqs * 890),
+      cache_read_tokens: Math.round(reqs * 21000),
+      total_tokens: Math.round(reqs * 26090),
+      cost: Number((wave * 2.15).toFixed(2)),
+      actual_cost: wave,
+    };
+  });
+  return {
+    mode: "quota",
+    status: "active",
+    isValid: true,
+    unit: "USD",
+    quota: { limit: 500, remaining: 214.65, used: 285.35, unit: "USD" },
+    usage: {
+      average_duration_ms: 18400,
+      rpm: 4,
+      tpm: 184200,
+      today: {
+        actual_cost: 18.4,
+        cost: 41.9,
+        requests: 210,
+        input_tokens: 882000,
+        output_tokens: 186900,
+        cache_read_tokens: 28200000,
+        total_tokens: 31200000,
+      },
+      total: {
+        actual_cost: 285.35,
+        cost: 612.4,
+        requests: 12480,
+        input_tokens: 274000000,
+        output_tokens: 9400000,
+        cache_read_tokens: 2556000000,
+        total_tokens: 2839400000,
+      },
+    },
+    model_stats: [
+      { model: "claude-opus-4-6", requests: 4120, input_tokens: 128000000, output_tokens: 4100000, cache_read_tokens: 1200000000, total_tokens: 1332100000, cost: 288.4, actual_cost: 132.45 },
+      { model: "claude-sonnet-4-5", requests: 3890, input_tokens: 92000000, output_tokens: 3200000, cache_read_tokens: 980000000, total_tokens: 1075200000, cost: 164.2, actual_cost: 76.2 },
+      { model: "gpt-5.3-codex", requests: 2140, input_tokens: 34000000, output_tokens: 1250000, cache_read_tokens: 260000000, total_tokens: 295250000, cost: 88.5, actual_cost: 42.15 },
+      { model: "gemini-3-pro-preview", requests: 1410, input_tokens: 14000000, output_tokens: 540000, cache_read_tokens: 90000000, total_tokens: 104540000, cost: 48.3, actual_cost: 21.9 },
+      { model: "gpt-5", requests: 640, input_tokens: 4500000, output_tokens: 220000, cache_read_tokens: 21000000, total_tokens: 25720000, cost: 16.4, actual_cost: 8.95 },
+      { model: "gemini-2.5-flash", requests: 280, input_tokens: 1500000, output_tokens: 90000, cache_read_tokens: 5000000, total_tokens: 6590000, cost: 6.6, actual_cost: 3.7 },
+    ],
+    daily_usage: days,
+  };
+}
+
 export default function App() {
   const [data, setData] = useState<TrueSotaResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -176,6 +276,7 @@ export default function App() {
   const [showKey, setShowKey] = useState(false);
   const [keyInput, setKeyInput] = useState<string>("");
   const [copied, setCopied] = useState(false);
+  const [copiedModelId, setCopiedModelId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<AppTab>("overview");
   const [autoRefreshInterval, setAutoRefreshInterval] = useState<number>(60000);
 
@@ -183,7 +284,10 @@ export default function App() {
   const [isIslandMode, setIsIslandMode] = useState<boolean>(false);
   const [isIslandExpanded, setIsIslandExpanded] = useState<boolean>(false);
   const [soundEnabled, setSoundEnabled] = useState<boolean>(appleAudio.enabled);
-  const [chartMetric, setChartMetric] = useState<"cost" | "requests" | "tokens">("cost");
+  const [chartMetric, setChartMetric] = useState<ChartMetric>("cost");
+  const [chartViewMode, setChartViewMode] = useState<ChartViewMode>(() => {
+    return localStorage.getItem("truesota_chart_mode") === "bars" ? "bars" : "area";
+  });
   const [hoveredDay, setHoveredDay] = useState<DailyUsageItem | null>(null);
   const [modelSearch, setModelSearch] = useState<string>("");
   const [providerFilter, setProviderFilter] = useState<string>("all");
@@ -248,6 +352,31 @@ export default function App() {
   // Initialize API Key, DPAPI Status, Native Preferences & Backdrop Material
   useEffect(() => {
     async function initApp() {
+      const isBrowserPreview =
+        typeof window !== "undefined" &&
+        !("__TAURI_INTERNALS__" in window) &&
+        new URLSearchParams(window.location.search).get("demo") === "1";
+
+      if (isBrowserPreview) {
+        const preview = createBrowserPreviewData();
+        const qs = new URLSearchParams(window.location.search);
+        skipNextLoadRef.current = true;
+        setApiKey("cr_preview_demo_key_9f8a7b");
+        setKeyInput("cr_preview_demo_key_9f8a7b");
+        setKeyLoaded(true);
+        setData(preview);
+        setLastUpdated("00:26:41");
+        if (qs.get("island") === "1") {
+          setIsIslandMode(true);
+          setIsIslandExpanded(qs.get("expanded") !== "0");
+        }
+        const tabParam = qs.get("tab") as AppTab | null;
+        if (tabParam && ["overview", "pricing", "monitor", "analytics", "models", "history", "settings"].includes(tabParam)) {
+          setActiveTab(tabParam);
+        }
+        return;
+      }
+
       try {
         const key = await invoke<string>("get_api_key");
         setApiKey(key.trim());
@@ -602,6 +731,9 @@ export default function App() {
   };
 
   useEffect(() => {
+    if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) {
+      return;
+    }
     const unlistenPromises = [
       listen("tray-refresh", () => {
         loadDataRef.current?.();
@@ -720,6 +852,21 @@ export default function App() {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const handleCopyModelId = (modelId: string) => {
+    appleAudio.playTap();
+    void navigator.clipboard.writeText(modelId);
+    setCopiedModelId(modelId);
+    window.setTimeout(() => {
+      setCopiedModelId((prev) => (prev === modelId ? null : prev));
+    }, 1600);
+  };
+
+  const handleSelectChartViewMode = (mode: ChartViewMode) => {
+    appleAudio.playTap();
+    setChartViewMode(mode);
+    localStorage.setItem("truesota_chart_mode", mode);
+  };
+
   // Core Quota Metrics
   const limit = data?.quota?.limit ?? 450.0;
   const remaining = data?.quota?.remaining ?? data?.remaining ?? data?.balance ?? 0;
@@ -813,60 +960,221 @@ export default function App() {
     [topModels.length]
   );
 
-  const renderBarsTrack = useCallback(
-    (metric: "cost" | "requests" | "tokens") => {
-      const peak = Math.max(
-        ...chartDays.map((d) =>
-          metric === "requests"
-            ? d.requests || 0
-            : metric === "tokens"
-              ? d.total_tokens || 0
-              : d.actual_cost ?? d.cost ?? 0
-        ),
-        0.01
-      );
-      return (
-        <div className="bars-track-area">
-          {chartDays.map((d) => {
-            const val =
-              metric === "requests"
-                ? d.requests || 0
-                : metric === "tokens"
-                  ? d.total_tokens || 0
-                  : d.actual_cost ?? d.cost ?? 0;
-            const heightPct = Math.max(8, Math.min(100, (val / peak) * 100));
-            const isToday = d.date === chartDays[chartDays.length - 1]?.date;
-            const isHovered = hoveredDay?.date === d.date;
-            return (
-              <div
-                key={d.date}
-                className={`chart-bar-col ${isHovered ? "active" : ""}`}
-                onMouseEnter={() => setHoveredDay(d)}
-                onMouseLeave={() => setHoveredDay(null)}
-              >
-                <div className="bar-pillar-wrap">
-                  <div
-                    className={`bar-pillar ${isToday ? "today" : ""}`}
-                    style={{ height: `${heightPct}%` }}
-                  />
+  const renderChartTrack = useCallback(
+    (metric: ChartMetric) => {
+      if (chartDays.length === 0) {
+        return <div className="empty-state">Нет данных за период</div>;
+      }
+
+      const values = chartDays.map((d) => getChartMetricValue(d, metric));
+      const peak = Math.max(...values, 0.01);
+
+      if (chartViewMode === "bars") {
+        return (
+          <div className={`bars-track-area metric-${metric}`}>
+            {chartDays.map((d, idx) => {
+              const val = values[idx];
+              const heightPct = Math.max(8, Math.min(100, (val / peak) * 100));
+              const isToday = idx === chartDays.length - 1;
+              const isHovered = hoveredDay?.date === d.date;
+              return (
+                <div
+                  key={d.date}
+                  className={`chart-bar-col ${isHovered ? "active" : ""}`}
+                  onMouseEnter={() => setHoveredDay(d)}
+                  onMouseLeave={() => setHoveredDay(null)}
+                >
+                  <div className="bar-pillar-wrap">
+                    <div
+                      className={`bar-pillar ${isToday ? "today" : ""}`}
+                      style={{ height: `${heightPct}%` }}
+                    />
+                  </div>
+                  <span className="bar-date-label">{d.date.slice(5)}</span>
                 </div>
-                <span className="bar-date-label">{d.date.slice(5)}</span>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
+        );
+      }
+
+      // Smooth Area Curve + Crosshair SVG Chart
+      const svgW = 560;
+      const svgH = 148;
+      const padX = 12;
+      const padTop = 14;
+      const baseLineY = 124;
+      const plotW = svgW - padX * 2;
+      const plotH = baseLineY - padTop;
+
+      const points = chartDays.map((d, idx) => {
+        const x =
+          chartDays.length > 1
+            ? padX + (idx / (chartDays.length - 1)) * plotW
+            : svgW / 2;
+        const ratio = Math.max(0, Math.min(1, values[idx] / peak));
+        const y = baseLineY - ratio * plotH;
+        return { x, y, day: d, val: values[idx] };
+      });
+
+      const { linePath, areaPath } = buildSmoothCurvePaths(points, baseLineY);
+      const strokeColor =
+        metric === "cost"
+          ? "#30d158"
+          : metric === "requests"
+            ? "#60a5fa"
+            : "#e4e4e7";
+      const gradId = `areaGrad-${metric}`;
+
+      const activePoint =
+        (hoveredDay ? points.find((p) => p.day.date === hoveredDay.date) : null) ||
+        points[points.length - 1];
+      const peakPoint = points.reduce(
+        (best, cur) => (cur.val >= best.val ? cur : best),
+        points[0]
+      );
+
+      // Show ~5 clean X-axis ticks evenly spaced without crowding
+      const tickStep = Math.max(1, Math.floor((chartDays.length - 1) / 4));
+
+      return (
+        <div
+          className="area-chart-stage"
+          onMouseLeave={() => setHoveredDay(null)}
+        >
+          <svg
+            viewBox={`0 0 ${svgW} ${svgH}`}
+            className="area-chart-svg"
+            preserveAspectRatio="none"
+          >
+            <defs>
+              <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor={strokeColor} stopOpacity="0.34" />
+                <stop offset="68%" stopColor={strokeColor} stopOpacity="0.08" />
+                <stop offset="100%" stopColor={strokeColor} stopOpacity="0" />
+              </linearGradient>
+            </defs>
+
+            {/* Hairline Horizontal Gridlines */}
+            <line
+              x1={padX}
+              y1={padTop}
+              x2={svgW - padX}
+              y2={padTop}
+              className="area-grid-line"
+            />
+            <line
+              x1={padX}
+              y1={padTop + plotH * 0.5}
+              x2={svgW - padX}
+              y2={padTop + plotH * 0.5}
+              className="area-grid-line"
+            />
+            <line
+              x1={padX}
+              y1={baseLineY}
+              x2={svgW - padX}
+              y2={baseLineY}
+              className="area-grid-baseline"
+            />
+
+            {/* Gradient Area Fill & Crisp Curve */}
+            <path d={areaPath} fill={`url(#${gradId})`} />
+            <path
+              d={linePath}
+              fill="none"
+              stroke={strokeColor}
+              strokeWidth="2.2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              vectorEffect="non-scaling-stroke"
+            />
+
+            {/* Vertical Crosshair on Active / Today Point */}
+            {activePoint && (
+              <>
+                <line
+                  x1={activePoint.x}
+                  y1={padTop}
+                  x2={activePoint.x}
+                  y2={baseLineY}
+                  className="area-crosshair"
+                />
+                <circle
+                  cx={activePoint.x}
+                  cy={activePoint.y}
+                  r="6"
+                  fill={strokeColor}
+                  fillOpacity="0.22"
+                />
+                <circle
+                  cx={activePoint.x}
+                  cy={activePoint.y}
+                  r="3.2"
+                  fill="#000000"
+                  stroke={strokeColor}
+                  strokeWidth="2"
+                />
+              </>
+            )}
+
+            {/* Subtle Peak Indicator Ring when hovering a different day */}
+            {hoveredDay && peakPoint.day.date !== hoveredDay.date && (
+              <circle
+                cx={peakPoint.x}
+                cy={peakPoint.y}
+                r="2.4"
+                fill="rgba(255,255,255,0.45)"
+              />
+            )}
+
+            {/* Invisible Hover Hit Columns for Smooth Scrubbing */}
+            {points.map((pt, idx) => {
+              const colW = plotW / points.length;
+              const rectX = Math.max(0, pt.x - colW / 2);
+              return (
+                <rect
+                  key={pt.day.date}
+                  x={rectX}
+                  y={0}
+                  width={idx === 0 || idx === points.length - 1 ? colW / 2 + padX : colW}
+                  height={baseLineY}
+                  fill="transparent"
+                  className="area-hit-col"
+                  onMouseEnter={() => setHoveredDay(pt.day)}
+                />
+              );
+            })}
+          </svg>
+
+          <div className="area-xaxis-labels">
+            {chartDays.map((d, idx) => {
+              const lastIdx = chartDays.length - 1;
+              const isNearLast = idx < lastIdx && lastIdx - idx < 2;
+              const show = idx === 0 || idx === lastIdx || (!isNearLast && idx % tickStep === 0);
+              return (
+                <span
+                  key={d.date}
+                  className={`area-tick-label ${hoveredDay?.date === d.date ? "active" : ""}`}
+                >
+                  {show ? d.date.slice(5) : ""}
+                </span>
+              );
+            })}
+          </div>
         </div>
       );
     },
-    [chartDays, hoveredDay]
+    [chartDays, chartViewMode, hoveredDay]
   );
 
   const chartSwipeItems = useMemo<SmoothTabItem[]>(
     () => [
-      { id: "cost", title: "Расход $", content: renderBarsTrack("cost") },
-      { id: "requests", title: "Запросы", content: renderBarsTrack("requests") },
-      { id: "tokens", title: "Токены", content: renderBarsTrack("tokens") },
+      { id: "cost", title: "Расход $", content: renderChartTrack("cost") },
+      { id: "requests", title: "Запросы", content: renderChartTrack("requests") },
+      { id: "tokens", title: "Токены", content: renderChartTrack("tokens") },
     ],
-    [renderBarsTrack]
+    [renderChartTrack]
   );
 
   const availableProviders = useMemo(() => {
@@ -981,6 +1289,38 @@ export default function App() {
                   <span className="val">{rpm} / {formatNumber(tpm)}</span>
                 </div>
               </div>
+
+              {chartDays.length > 1 && (() => {
+                const miniDays = chartDays.slice(-7);
+                const miniPeak = Math.max(...miniDays.map((d) => d.actual_cost ?? d.cost ?? 0), 0.01);
+                const pts = miniDays.map((d, idx) => ({
+                  x: (idx / (miniDays.length - 1)) * 220,
+                  y: 26 - ((d.actual_cost ?? d.cost ?? 0) / miniPeak) * 20,
+                }));
+                const { linePath, areaPath } = buildSmoothCurvePaths(pts, 28);
+                return (
+                  <div className="island-spark-row">
+                    <div className="island-spark-meta">
+                      <span>Тренд 7д</span>
+                      <strong>
+                        {forecastInfo.daysLeft !== null
+                          ? `~${forecastInfo.daysLeft < 1 ? "< 1" : Math.round(forecastInfo.daysLeft)} дн.`
+                          : `$${forecastInfo.avgDaily.toFixed(1)}/д`}
+                      </strong>
+                    </div>
+                    <svg viewBox="0 0 220 30" className="island-spark-svg" preserveAspectRatio="none">
+                      <defs>
+                        <linearGradient id="islandSparkGrad" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor={ringColor} stopOpacity="0.32" />
+                          <stop offset="100%" stopColor={ringColor} stopOpacity="0" />
+                        </linearGradient>
+                      </defs>
+                      <path d={areaPath} fill="url(#islandSparkGrad)" />
+                      <path d={linePath} fill="none" stroke={ringColor} strokeWidth="1.8" strokeLinecap="round" />
+                    </svg>
+                  </div>
+                );
+              })()}
 
               {topModels.length > 0 && (
                 <div className="island-top-models">
@@ -1230,7 +1570,7 @@ export default function App() {
             quotaLeftText={`$${remaining.toFixed(2)}`}
             backdropMode={backdropMode}
             onSelectBackdrop={handleSelectBackdrop}
-            appVersion={updateInfo?.current_version || "1.2.0"}
+            appVersion={updateInfo?.current_version || "1.3.0"}
             updateAvailableVersion={
               updateInfo?.has_update ? updateInfo.latest_version : null
             }
@@ -1299,25 +1639,66 @@ export default function App() {
         )}
 
         {/* TAB 1: OVERVIEW */}
-        {activeTab === "overview" && (
+        {activeTab === "overview" && (() => {
+          const healthState = percent < 15 ? "low" : percent < 40 ? "med" : "good";
+          const usedPct = Math.min(100, Math.max(0, 100 - percent));
+          const todayVsAvgPct =
+            forecastInfo.avgDaily > 0.05
+              ? Math.round(((todayCost - forecastInfo.avgDaily) / forecastInfo.avgDaily) * 100)
+              : null;
+
+          return (
           <div className="bento-container">
             {/* 3-Column Bento Hero Grid */}
             <div className="bento-hero-grid">
               {/* Quota Ring Card */}
-              <div className="bento-card hero-quota-card">
+              <div className={`bento-card hero-quota-card health-${healthState}`}>
                 <div className="card-subhead">
                   <span>Квота пакета</span>
-                  <span className="mode-pill">{data?.mode || "quota"}</span>
+                  <div className="hero-subhead-badges">
+                    {forecastInfo.daysLeft !== null && (
+                      <span className="forecast-micro-pill">
+                        <Hourglass size={10} />
+                        <span>
+                          {forecastInfo.daysLeft < 1
+                            ? "< 1 дн."
+                            : `~${Math.round(forecastInfo.daysLeft)} дн.`}
+                        </span>
+                      </span>
+                    )}
+                    <span className="mode-pill">{data?.mode || "quota"}</span>
+                  </div>
                 </div>
                 <div className="ring-content-row">
                   <div className="gauge-ring-container">
                     <svg viewBox="0 0 100 100" className="gauge-svg" width="108" height="108">
+                      <defs>
+                        <linearGradient id="gaugeGoodGrad" x1="0" y1="0" x2="1" y2="1">
+                          <stop offset="0%" stopColor="#ffffff" />
+                          <stop offset="100%" stopColor="#30d158" />
+                        </linearGradient>
+                        <linearGradient id="gaugeMedGrad" x1="0" y1="0" x2="1" y2="1">
+                          <stop offset="0%" stopColor="#ffd60a" />
+                          <stop offset="100%" stopColor="#ff9f0a" />
+                        </linearGradient>
+                        <linearGradient id="gaugeLowGrad" x1="0" y1="0" x2="1" y2="1">
+                          <stop offset="0%" stopColor="#ff9f0a" />
+                          <stop offset="100%" stopColor="#ff453a" />
+                        </linearGradient>
+                      </defs>
                       <circle cx="50" cy="50" r="40" className="gauge-bg" strokeWidth="8" />
                       <circle
                         cx="50"
                         cy="50"
                         r="40"
-                        className={`gauge-fill ${percent < 15 ? "low" : percent < 40 ? "med" : "good"}`}
+                        className={`gauge-fill ${healthState}`}
+                        stroke={
+                          healthState === "low"
+                            ? "url(#gaugeLowGrad)"
+                            : healthState === "med"
+                              ? "url(#gaugeMedGrad)"
+                              : "url(#gaugeGoodGrad)"
+                        }
                         strokeWidth="8"
                         strokeDasharray="251.32"
                         strokeDashoffset={251.32 * (1 - percent / 100)}
@@ -1332,7 +1713,22 @@ export default function App() {
                   </div>
 
                   <div className="hero-money-details">
-                    <AnimatedNumber value={remaining} prefix="$" decimals={2} className="hero-big-money" />
+                    <AnimatedNumber
+                      value={remaining}
+                      prefix="$"
+                      decimals={2}
+                      splitDecimals
+                      className="hero-big-money"
+                    />
+                    <div className="hero-quota-progress-wrap">
+                      <div className="hero-quota-bar">
+                        <div
+                          className={`hero-quota-bar-fill ${healthState}`}
+                          style={{ width: `${percent}%` }}
+                        />
+                      </div>
+                      <span className="hero-quota-used-pct">{usedPct.toFixed(0)}% расх.</span>
+                    </div>
                     <div className="hero-meta-list">
                       <div className="meta-item">
                         <span className="dot blue" />
@@ -1353,10 +1749,23 @@ export default function App() {
               <div className="bento-card metric-card">
                 <div className="card-subhead">
                   <span>Сегодня</span>
-                  <Clock size={13} className="subhead-icon green" />
+                  <div className="metric-head-right">
+                    {todayVsAvgPct !== null && (
+                      <span className={`delta-micro-pill ${todayVsAvgPct <= 0 ? "cool" : "warm"}`}>
+                        {todayVsAvgPct > 0 ? `+${todayVsAvgPct}%` : `${todayVsAvgPct}%`} к 7д
+                      </span>
+                    )}
+                    <Clock size={13} className="subhead-icon green" />
+                  </div>
                 </div>
                 <div className="metric-cost-row">
-                  <AnimatedNumber value={todayCost} prefix="$" decimals={2} className="metric-large-text" />
+                  <AnimatedNumber
+                    value={todayCost}
+                    prefix="$"
+                    decimals={2}
+                    splitDecimals
+                    className="metric-large-text"
+                  />
                   {todaySavingsPct > 0 && (
                     <>
                       <span className="strike-cost">${todayNominal.toFixed(2)}</span>
@@ -1387,7 +1796,13 @@ export default function App() {
                   <Database size={13} className="subhead-icon blue" />
                 </div>
                 <div className="metric-cost-row">
-                  <AnimatedNumber value={totalCost} prefix="$" decimals={2} className="metric-large-text" />
+                  <AnimatedNumber
+                    value={totalCost}
+                    prefix="$"
+                    decimals={2}
+                    splitDecimals
+                    className="metric-large-text"
+                  />
                   {totalSavedPct >= 1 && (
                     <span className="savings-tag">-{Math.round(totalSavedPct)}%</span>
                   )}
@@ -1409,11 +1824,11 @@ export default function App() {
               </div>
             </div>
 
-            {/* 4-Column Apple Insights Strip */}
-            <div className="insights-strip">
+            {/* Unified 4-Column Telemetry Dock */}
+            <div className="insights-strip telemetry-dock">
               <div className="insight-pill-card">
                 <div className="insight-icon-wrap green">
-                  <Layers size={16} />
+                  <Layers size={15} />
                 </div>
                 <div className="insight-text-col">
                   <span className="insight-label">Кэш-хит</span>
@@ -1426,7 +1841,7 @@ export default function App() {
 
               <div className="insight-pill-card">
                 <div className="insight-icon-wrap blue">
-                  <PiggyBank size={16} />
+                  <PiggyBank size={15} />
                 </div>
                 <div className="insight-text-col">
                   <span className="insight-label">Экономия</span>
@@ -1439,7 +1854,7 @@ export default function App() {
 
               <div className="insight-pill-card">
                 <div className="insight-icon-wrap orange">
-                  <Zap size={16} />
+                  <Zap size={15} />
                 </div>
                 <div className="insight-text-col">
                   <span className="insight-label">Ср. отклик</span>
@@ -1452,7 +1867,7 @@ export default function App() {
 
               <div className="insight-pill-card">
                 <div className="insight-icon-wrap purple">
-                  <Hourglass size={16} />
+                  <Hourglass size={15} />
                 </div>
                 <div className="insight-text-col">
                   <span className="insight-label">Прогноз</span>
@@ -1479,45 +1894,67 @@ export default function App() {
                   value={chartMetric}
                   onChange={(id) => {
                     appleAudio.playTap();
-                    setChartMetric(id as "cost" | "requests" | "tokens");
+                    setChartMetric(id as ChartMetric);
                   }}
                   headerLeft={
                     <span className="card-subhead">Динамика (14 дней)</span>
                   }
                   headerRight={
-                    <div className="chart-hover-pill">
-                      {hoveredDay ? (
-                        <span>
-                          {hoveredDay.date}:{" "}
-                          <strong>
-                            $
-                            {(hoveredDay.actual_cost ?? hoveredDay.cost ?? 0).toFixed(2)}
-                          </strong>{" "}
-                          • {hoveredDay.requests} зап. •{" "}
-                          {formatNumber(hoveredDay.total_tokens)} ток.
-                        </span>
-                      ) : (
-                        <span>
-                          Пик:{" "}
-                          <strong>
-                            {chartMetric === "cost"
-                              ? `$${maxChartValue.toFixed(2)}`
-                              : chartMetric === "requests"
-                                ? `${Math.round(maxChartValue)} зап.`
-                                : formatNumber(maxChartValue)}
-                          </strong>
-                        </span>
-                      )}
+                    <div className="chart-header-controls">
+                      <div className="chart-view-toggle" role="group" aria-label="Вид графика">
+                        <button
+                          type="button"
+                          className={`chart-view-btn ${chartViewMode === "area" ? "active" : ""}`}
+                          onClick={() => handleSelectChartViewMode("area")}
+                          title="Плавный график"
+                        >
+                          <TrendingUp size={11} />
+                        </button>
+                        <button
+                          type="button"
+                          className={`chart-view-btn ${chartViewMode === "bars" ? "active" : ""}`}
+                          onClick={() => handleSelectChartViewMode("bars")}
+                          title="Столбцы"
+                        >
+                          <BarChart3 size={11} />
+                        </button>
+                      </div>
+                      <div className="chart-hover-pill">
+                        {hoveredDay ? (
+                          <span>
+                            {hoveredDay.date.slice(5)}:{" "}
+                            <strong>
+                              $
+                              {(hoveredDay.actual_cost ?? hoveredDay.cost ?? 0).toFixed(2)}
+                            </strong>{" "}
+                            • {hoveredDay.requests} зап.
+                          </span>
+                        ) : (
+                          <span>
+                            Пик:{" "}
+                            <strong>
+                              {chartMetric === "cost"
+                                ? `$${maxChartValue.toFixed(2)}`
+                                : chartMetric === "requests"
+                                  ? `${Math.round(maxChartValue)} зап.`
+                                  : formatNumber(maxChartValue)}
+                            </strong>
+                          </span>
+                        )}
+                      </div>
                     </div>
                   }
                 />
               </div>
 
-            {/* Top Models Preview Card with AI Logos */}
+            {/* Top Models Leaderboard Card */}
             {topModels.length > 0 && (
               <div className="bento-card preview-models-card">
                 <div className="card-subhead-row">
-                  <span className="card-subhead">Топ нейросетей</span>
+                  <div className="models-head-title">
+                    <span className="card-subhead">Топ нейросетей</span>
+                    <span className="models-copy-hint">нажмите чтобы скопировать ID</span>
+                  </div>
                   <button className="link-btn" onClick={() => handleTabChange("models")}>
                     <span>Все модели ({topModels.length})</span>
                     <ChevronRight size={12} />
@@ -1525,33 +1962,46 @@ export default function App() {
                 </div>
 
                 <div className="models-mini-list">
-                  {topModels.slice(0, 6).map((item) => {
+                  {topModels.slice(0, 6).map((item, idx) => {
                     const actual = item.actual_cost ?? item.cost ?? 0;
                     const nominal = item.cost || actual;
                     const sharePct = totalCost > 0 ? (actual / totalCost) * 100 : 0;
                     const provider = detectProvider(item.model);
+                    const isCopied = copiedModelId === item.model;
                     return (
-                      <div key={item.model} className="mini-model-row-logo">
+                      <button
+                        type="button"
+                        key={item.model}
+                        className={`mini-model-row-logo ${idx === 0 ? "rank-top" : ""} ${isCopied ? "is-copied" : ""}`}
+                        onClick={() => handleCopyModelId(item.model)}
+                        title={`Скопировать ID модели: ${item.model}`}
+                      >
                         <div className="model-identity-cell">
+                          <span className={`model-rank-num ${idx === 0 ? "top" : ""}`}>
+                            {idx + 1}
+                          </span>
                           <ModelLogo model={item.model} size={15} withBadge={true} />
                           <div className="model-identity-text">
-                            <span className="mini-model-name" title={item.model}>
-                              {item.model}
+                            <span className="mini-model-name">
+                              {isCopied ? "✓ Скопировано в буфер" : item.model}
                             </span>
                             <span className="model-provider-sub">
-                              {provider.label} • {formatNumber(item.total_tokens)} токенов
+                              {provider.label} • {formatNumber(item.total_tokens)} ток.
                             </span>
                           </div>
                         </div>
 
-                        <div className="mini-model-bar-wrap">
-                          <div
-                            className="mini-model-bar"
-                            style={{
-                              width: `${Math.min(100, Math.max(6, sharePct))}%`,
-                              backgroundColor: provider.color,
-                            }}
-                          />
+                        <div className="mini-model-bar-cell">
+                          <div className="mini-model-bar-wrap">
+                            <div
+                              className="mini-model-bar"
+                              style={{
+                                width: `${Math.min(100, Math.max(6, sharePct))}%`,
+                                backgroundColor: provider.color,
+                              }}
+                            />
+                          </div>
+                          <span className="mini-model-share">{Math.round(sharePct)}%</span>
                         </div>
 
                         <div className="mini-model-stats">
@@ -1559,9 +2009,9 @@ export default function App() {
                           {nominal > actual * 1.05 && (
                             <span className="strike-cost">${nominal.toFixed(0)}</span>
                           )}
-                          <span>({item.requests})</span>
+                          <span className="mini-req-badge">{item.requests}</span>
                         </div>
-                      </div>
+                      </button>
                     );
                   })}
                 </div>
@@ -1569,7 +2019,8 @@ export default function App() {
             )}
             </div>
           </div>
-        )}
+          );
+        })()}
 
         {/* TAB 2: MODELS */}
         {activeTab === "models" && (
@@ -2194,7 +2645,7 @@ export default function App() {
                         <div className="setting-label-col">
                           <span className="setting-name">
                             Обновления с GitHub (
-                            <code>v{updateInfo?.current_version || "1.2.0"}</code>)
+                            <code>v{updateInfo?.current_version || "1.3.0"}</code>)
                           </span>
                           <span className="setting-description">
                             {updateError

@@ -29,6 +29,7 @@
   const state = {
     tab: "overview",
     chartMetric: "cost",
+    chartMode: "area",
     hmMetric: "cost",
     pricingGroup: "Все",
     pricingSearch: "",
@@ -92,6 +93,40 @@
     requestAnimationFrame(() => setTimeout(updateTabIndicator, 40));
   }
 
+  function buildAreaSvg(maxVal) {
+    const stroke = state.chartMetric === "cost" ? "#30d158" : state.chartMetric === "req" ? "#60a5fa" : "#e4e4e7";
+    const w = 520, h = 112, padX = 10, padT = 10, baseY = 104;
+    const pts = DAILY.map((x, i) => ({
+      x: padX + (i / (DAILY.length - 1)) * (w - padX * 2),
+      y: baseY - (x[state.chartMetric] / maxVal) * (baseY - padT),
+      d: x.d,
+      tip: state.chartMetric === "cost" ? `$${x.cost.toFixed(2)}` : state.chartMetric === "req" ? `${x.req} запр.` : `${x.tok.toFixed(1)}M`
+    }));
+    let line = `M ${pts[0].x.toFixed(1)} ${pts[0].y.toFixed(1)}`;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const p0 = pts[Math.max(0, i - 1)], p1 = pts[i], p2 = pts[i + 1], p3 = pts[Math.min(pts.length - 1, i + 2)];
+      const c1x = p1.x + (p2.x - p0.x) / 6, c1y = p1.y + (p2.y - p0.y) / 6;
+      const c2x = p2.x - (p3.x - p1.x) / 6, c2y = p2.y - (p3.y - p1.y) / 6;
+      line += ` C ${c1x.toFixed(1)} ${c1y.toFixed(1)}, ${c2x.toFixed(1)} ${c2y.toFixed(1)}, ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`;
+    }
+    const area = `${line} L ${pts[pts.length - 1].x.toFixed(1)} ${baseY} L ${pts[0].x.toFixed(1)} ${baseY} Z`;
+    const last = pts[pts.length - 1];
+    const hits = pts.map((p) => `<rect x="${(p.x - 18).toFixed(1)}" y="0" width="36" height="${h}" fill="transparent" data-bar-tip="${p.d}: ${p.tip}" style="cursor:crosshair"></rect>`).join("");
+    return `
+      <svg viewBox="0 0 ${w} ${h}" class="area-sim-svg" preserveAspectRatio="none">
+        <defs><linearGradient id="simAreaG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${stroke}" stop-opacity="0.34"/><stop offset="100%" stop-color="${stroke}" stop-opacity="0"/></linearGradient></defs>
+        <line x1="${padX}" y1="${padT}" x2="${w - padX}" y2="${padT}" stroke="rgba(255,255,255,0.06)" stroke-dasharray="3 4"/>
+        <line x1="${padX}" y1="${(padT + baseY) / 2}" x2="${w - padX}" y2="${(padT + baseY) / 2}" stroke="rgba(255,255,255,0.06)" stroke-dasharray="3 4"/>
+        <line x1="${padX}" y1="${baseY}" x2="${w - padX}" y2="${baseY}" stroke="rgba(255,255,255,0.12)"/>
+        <path d="${area}" fill="url(#simAreaG)"/>
+        <path d="${line}" fill="none" stroke="${stroke}" stroke-width="2.2" stroke-linecap="round"/>
+        <line x1="${last.x.toFixed(1)}" y1="${padT}" x2="${last.x.toFixed(1)}" y2="${baseY}" stroke="rgba(255,255,255,0.28)" stroke-dasharray="2.5 3"/>
+        <circle cx="${last.x.toFixed(1)}" cy="${last.y.toFixed(1)}" r="3.5" fill="#000" stroke="${stroke}" stroke-width="2"/>
+        ${hits}
+      </svg>
+      <div class="area-sim-ticks"><span>10-29</span><span>11-02</span><span>11-05</span><span>11-08</span><span>11-12</span></div>`;
+  }
+
   function renderOverview() {
     const maxVal = Math.max(...DAILY.map((x) => x[state.chartMetric]));
     const barsHtml = DAILY.map((x) => {
@@ -103,32 +138,42 @@
       </div>`;
     }).join("");
 
-    const topHtml = MODELS.slice(0, 4).map((m) => {
+    const chartBodyHtml = state.chartMode === "bars" ? `<div class="bars-box">${barsHtml}</div>` : buildAreaSvg(maxVal);
+
+    const topHtml = MODELS.slice(0, 5).map((m, idx) => {
       const w = Math.round((m.actual / 142.8) * 100);
       return `<div class="model-item" data-copy-id="${m.name}">
-        <div><div class="m-name">${m.name}</div><div class="m-sub">${m.provider} · ${m.tok} ток.</div></div>
+        <div><div class="m-name"><span style="color:${idx === 0 ? "#30d158" : "#71717a"};font-family:var(--font-mono);margin-right:6px;">${idx + 1}</span>${m.name}</div><div class="m-sub">${m.provider} · ${m.tok} ток.</div></div>
         <div class="m-track"><div class="m-bar" style="width:${w}%;background:${m.color}"></div></div>
-        <div style="text-align:right;font-size:0.74rem;"><strong>$${m.actual.toFixed(2)}</strong> <span style="color:#71717a;">(${m.req})</span></div>
+        <div style="text-align:right;font-size:0.74rem;"><span style="color:#71717a;margin-right:6px;">${Math.round(m.share)}%</span><strong>$${m.actual.toFixed(2)}</strong> <span style="color:#71717a;">(${m.req})</span></div>
       </div>`;
     }).join("");
 
     return `
       <div class="sim-grid-hero">
-        <div class="bento-card quota-full">
+        <div class="bento-card quota-full hero-aura-good">
           <div style="display:flex;justify-content:space-between;align-items:center;">
             <span class="card-kicker">Квота пакета</span>
-            <span class="badge-pro">QUOTA</span>
+            <div style="display:inline-flex;gap:6px;align-items:center;">
+              <span class="badge-pro">⏳ ~9 дн.</span>
+              <span class="badge-pro">QUOTA</span>
+            </div>
           </div>
           <div class="quota-row">
             <svg width="88" height="88" viewBox="0 0 100 100" style="flex-shrink:0;">
+              <defs><linearGradient id="simRingG" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#fff"/><stop offset="100%" stop-color="#30d158"/></linearGradient></defs>
               <circle cx="50" cy="50" r="40" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="9"></circle>
-              <circle cx="50" cy="50" r="40" fill="none" stroke="#ffffff" stroke-width="9" stroke-linecap="round"
+              <circle cx="50" cy="50" r="40" fill="none" stroke="url(#simRingG)" stroke-width="9" stroke-linecap="round"
                 stroke-dasharray="251.3" stroke-dashoffset="${251.3 * (1 - 0.429)}" transform="rotate(-90 50 50)"></circle>
               <text x="50" y="48" text-anchor="middle" fill="#fff" font-size="16" font-weight="800">42.9%</text>
               <text x="50" y="63" text-anchor="middle" fill="#71717a" font-size="9">остаток</text>
             </svg>
-            <div>
-              <div class="quota-val">$214.65</div>
+            <div style="flex:1;min-width:0;">
+              <div class="quota-val">$214<span class="dec-part">.65</span></div>
+              <div class="quota-bar-row">
+                <div class="quota-bar-track"><div class="quota-bar-fill" style="width:42.9%"></div></div>
+                <span style="font-size:0.62rem;font-family:var(--font-mono);color:#71717a;">57% расх.</span>
+              </div>
               <div class="quota-meta">
                 <span>● Лимит: <strong style="color:#fff;">$500.00</strong></span>
                 <span>● Потрачено: <strong style="color:#d4d4d8;">$285.35</strong></span>
@@ -137,22 +182,22 @@
           </div>
         </div>
         <div class="bento-card">
-          <span class="card-kicker">Сегодня</span>
-          <div class="big-money">$7.92<span class="old-money">$18.40</span><span class="green-pill">-57%</span></div>
+          <div style="display:flex;justify-content:space-between;align-items:center;"><span class="card-kicker">Сегодня</span><span class="green-pill">-35% к 7д</span></div>
+          <div class="big-money">$7<span class="dec-part">.92</span><span class="old-money">$18.40</span><span class="green-pill">-57%</span></div>
           <div class="kv-row"><span>Запросы</span><strong>148</strong></div>
           <div class="kv-row"><span>Кэш-токены</span><strong>28.2M / 31.2M</strong></div>
           <div class="kv-row"><span>RPM / TPM</span><strong>4 / 184.2K</strong></div>
         </div>
         <div class="bento-card">
           <span class="card-kicker">Всего</span>
-          <div class="big-money">$285.35<span class="green-pill">-53%</span></div>
+          <div class="big-money">$285<span class="dec-part">.35</span><span class="green-pill">-53%</span></div>
           <div class="kv-row"><span>Запросы</span><strong>12,480</strong></div>
           <div class="kv-row"><span>In / Out</span><strong>274.0M / 9.4M</strong></div>
           <div class="kv-row"><span>Всего токенов</span><strong>2.84B</strong></div>
         </div>
       </div>
 
-      <div class="insights-row">
+      <div class="insights-row telemetry-dock">
         <div class="insight-card"><div class="insight-ico" style="color:#30d158;">✦</div><div><div class="card-kicker">Кэш-хит</div><div class="insight-v">90.0%</div><div class="insight-s">2.56B из кэша</div></div></div>
         <div class="insight-card"><div class="insight-ico" style="color:#38bdf8;">$</div><div><div class="card-kicker">Экономия</div><div class="insight-v">$327.05</div><div class="insight-s">база $612</div></div></div>
         <div class="insight-card"><div class="insight-ico" style="color:#ff9f0a;">⚡</div><div><div class="card-kicker">Ср. отклик</div><div class="insight-v">24.8с</div><div class="insight-s">~$0.023 / запр.</div></div></div>
@@ -169,9 +214,15 @@
               <button type="button" class="sub-pill ${state.chartMetric === "tok" ? "active" : ""}" data-cmetric="tok">Токены</button>
             </div>
           </div>
-          <span id="chartHoverTip" style="font-size:0.72rem;color:#30d158;font-weight:700;">Пик: $44.10</span>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <div class="sub-pills">
+              <button type="button" class="sub-pill ${state.chartMode === "area" ? "active" : ""}" data-cmode="area">Кривая</button>
+              <button type="button" class="sub-pill ${state.chartMode === "bars" ? "active" : ""}" data-cmode="bars">Бары</button>
+            </div>
+            <span id="chartHoverTip" style="font-size:0.72rem;color:#30d158;font-weight:700;">Пик: $44.10</span>
+          </div>
         </div>
-        <div class="bars-box">${barsHtml}</div>
+        ${chartBodyHtml}
       </div>
 
       <div class="bento-card" style="margin-top:10px;">
@@ -448,6 +499,7 @@
     });
 
     document.querySelectorAll("[data-cmetric]").forEach((b) => b.addEventListener("click", () => { state.chartMetric = b.dataset.cmetric; render(); }));
+    document.querySelectorAll("[data-cmode]").forEach((b) => b.addEventListener("click", () => { state.chartMode = b.dataset.cmode; render(); }));
     document.querySelectorAll("[data-bar-tip]").forEach((b) => b.addEventListener("mouseenter", () => {
       const tip = $("chartHoverTip"); if (tip) tip.textContent = b.dataset.barTip;
     }));
@@ -478,7 +530,7 @@
     document.querySelectorAll("[data-pct]").forEach((b) => b.addEventListener("click", () => { state.lowAlertPct = Number(b.dataset.pct); render(); }));
     $("toggleAutostart")?.addEventListener("click", () => { state.autostart = !state.autostart; render(); });
     $("testAlertBtn")?.addEventListener("click", () => showToast("🔔 Windows Алерт: Остаток квоты ниже 15% ($214.65)"));
-    $("checkUpdateSetBtn")?.addEventListener("click", () => showToast("У вас актуальная версия v1.2.0"));
+    $("checkUpdateSetBtn")?.addEventListener("click", () => showToast("У вас актуальная версия v1.3.0"));
   }
 
   function switchTab(tab) {
@@ -524,7 +576,7 @@
   }));
   profMenu.querySelectorAll("[data-nav]").forEach((b) => b.addEventListener("click", () => { profMenu.classList.add("hidden"); switchTab(b.dataset.nav); }));
   $("menuShareBtn").addEventListener("click", () => { profMenu.classList.add("hidden"); $("simShareModal").classList.remove("hidden"); });
-  $("menuUpdateBtn").addEventListener("click", () => { profMenu.classList.add("hidden"); showToast("Релиз v1.2.0 актуален ✓"); });
+  $("menuUpdateBtn").addEventListener("click", () => { profMenu.classList.add("hidden"); showToast("Релиз v1.3.0 актуален ✓"); });
   $("menuDpapiBtn").addEventListener("click", () => { profMenu.classList.add("hidden"); switchTab("settings"); });
   $("menuLogoutBtn").addEventListener("click", () => { profMenu.classList.add("hidden"); setMode({ welcome: true }); });
 

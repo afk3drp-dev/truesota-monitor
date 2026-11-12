@@ -7,6 +7,7 @@ interface AnimatedNumberProps {
   suffix?: string;
   duration?: number;
   className?: string;
+  splitDecimals?: boolean;
 }
 
 export const AnimatedNumber: React.FC<AnimatedNumberProps> = ({
@@ -16,6 +17,7 @@ export const AnimatedNumber: React.FC<AnimatedNumberProps> = ({
   suffix = "",
   duration = 800,
   className = "",
+  splitDecimals = false,
 }) => {
   const [displayValue, setDisplayValue] = useState<number>(value);
   const startValueRef = useRef<number>(value);
@@ -69,6 +71,20 @@ export const AnimatedNumber: React.FC<AnimatedNumberProps> = ({
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
   });
+
+  if (splitDecimals && decimals > 0) {
+    const dotIndex = formatted.lastIndexOf(".");
+    const intPart = dotIndex >= 0 ? formatted.slice(0, dotIndex) : formatted;
+    const decPart = dotIndex >= 0 ? formatted.slice(dotIndex) : "";
+    return (
+      <span className={className}>
+        {prefix && <span className="animated-prefix">{prefix}</span>}
+        <span className="animated-int">{intPart}</span>
+        {decPart && <span className="animated-decimals">{decPart}</span>}
+        {suffix}
+      </span>
+    );
+  }
 
   return (
     <span className={className}>
