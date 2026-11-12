@@ -44,7 +44,7 @@
 
 <br />
 
-<img src="docs/demo_v120.webp" alt="TrueSOTA Usage Monitor Live OLED UI Animation" width="100%" />
+<img src="docs/hero_v121.png" alt="TrueSOTA Usage Monitor Showcase" width="100%" />
 
 </div>
 
@@ -106,6 +106,15 @@ Get-FileHash .\TrueSOTA_Monitor_Tauri.exe -Algorithm SHA256
 ---
 
 ## Галерея интерфейса
+
+<details>
+<summary><b>Живая анимация интерфейса (вкладки, Heatmap, Ctrl+K, Dynamic Island)</b></summary>
+
+<br />
+
+<img src="docs/demo_v120.webp" alt="TrueSOTA Usage Monitor Live Animation" width="100%" />
+
+</details>
 
 <details>
 <summary><b>Открыть все экраны приложения (7 скриншотов)</b></summary>

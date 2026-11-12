@@ -44,7 +44,7 @@
 
 <br />
 
-<img src="docs/demo_v120.webp" alt="TrueSOTA Usage Monitor Live OLED UI Animation" width="100%" />
+<img src="docs/hero_v121.png" alt="TrueSOTA Usage Monitor Showcase" width="100%" />
 
 </div>
 
@@ -106,6 +106,15 @@ Click **More info → Run anyway** (and feel free to verify the SHA-256 hash or 
 ---
 
 ## Interface Gallery
+
+<details>
+<summary><b>Live UI animation (tabs, Heatmap, Ctrl+K, Dynamic Island)</b></summary>
+
+<br />
+
+<img src="docs/demo_v120.webp" alt="TrueSOTA Usage Monitor Live Animation" width="100%" />
+
+</details>
 
 <details>
 <summary><b>Expand all 7 app views</b></summary>
