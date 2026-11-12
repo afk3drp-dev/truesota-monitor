@@ -1,0 +1,29 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.9.0.schema.json
+
+PackageIdentifier: afk3drp-dev.TrueSOTAMonitor
+PackageVersion: 1.2.0
+PackageLocale: en-US
+Publisher: truesota
+PublisherUrl: https://github.com/afk3drp-dev
+PublisherSupportUrl: https://github.com/afk3drp-dev/truesota-monitor/issues
+Author: afk3drp-dev
+PackageName: TrueSOTA Monitor
+PackageUrl: https://afk3drp-dev.github.io/truesota-monitor/
+License: MIT
+LicenseUrl: https://github.com/afk3drp-dev/truesota-monitor/blob/main/LICENSE
+Copyright: Copyright (c) 2026 afk3drp-dev
+ShortDescription: Native OLED Windows 11 desktop client for TrueSOTA API quota, model pricing, Prompt Cache analytics, and gateway monitoring.
+Description: |-
+  TrueSOTA Usage Monitor is a lightweight native Windows 11 application built with Tauri v2, React 19, and Rust in a Pure OLED design.
+  It tracks package quota remaining, daily/total spend, Prompt Cache savings, 22-week activity heatmaps, live model pricing, gateway latency, system tray alerts, and stores personal API keys locally encrypted via Windows DPAPI.
+Moniker: truesota-monitor
+Tags:
+  - desktop
+  - monitor
+  - oled
+  - rust
+  - tauri
+  - usage
+ReleaseNotesUrl: https://github.com/afk3drp-dev/truesota-monitor/releases/tag/v1.2.0
+ManifestType: defaultLocale
+ManifestVersion: 1.9.0

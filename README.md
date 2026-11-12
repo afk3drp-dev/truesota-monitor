@@ -44,7 +44,7 @@
 
 <br />
 
-<img src="docs/hero_v120.png" alt="TrueSOTA Usage Monitor Showcase" width="100%" />
+<img src="docs/demo_v120.webp" alt="TrueSOTA Usage Monitor Live OLED UI Animation" width="100%" />
 
 </div>
 
